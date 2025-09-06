@@ -17,6 +17,7 @@ import {
   startPronunciationRace,
   changePrompt,
   speakText,
+  syncProgress,
 } from '../lib/actions';
 import PronunciationRace from './PronunciationRace';
 import ListeningDrill from './ListeningDrill';
@@ -51,12 +52,14 @@ function ToastContainer() {
 }
 
 export default function App() {
-  const { view, user, isRecording, voiceCommandState } = useStore();
+  const { view, user, isRecording, voiceCommandState, isOnline } = useStore();
   const [isDark, setIsDark] = useState(true);
 
   const toggleThemeRef = useRef();
   const isCommandRecognitionActive = useRef(false);
   const shouldRestartRecognition = useRef(true);
+  const wasOnline = useRef(navigator.onLine);
+
 
   useEffect(() => {
     toggleThemeRef.current = () => setIsDark(p => !p);
@@ -67,13 +70,28 @@ export default function App() {
   }, [isDark]);
 
   useEffect(() => {
-    const handleOnline = () => setOnlineStatus(true);
-    const handleOffline = () => setOnlineStatus(false);
+    // --- Robust Online Status Check ---
+    const checkOnlineStatus = async () => {
+      try {
+        // A lightweight request to a reliable endpoint is a good way to check for real internet access.
+        // We use no-cors mode because we don't need to read the response, just see if the request succeeds.
+        const response = await fetch('https://www.google.com/generate_204', {
+          method: 'HEAD',
+          mode: 'no-cors',
+          cache: 'no-store',
+        });
+        // Check navigator.onLine as a fallback or for quick changes.
+        setOnlineStatus(navigator.onLine);
+      } catch (error) {
+        // A failed fetch indicates offline status.
+        setOnlineStatus(false);
+      }
+    };
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    setOnlineStatus(navigator.onLine);
-    
+    checkOnlineStatus(); // Check immediately on load
+    const intervalId = setInterval(checkOnlineStatus, 30000); // And every 30 seconds
+
+    // --- PWA Install Prompt ---
     const handleInstallPrompt = (e) => {
       e.preventDefault();
       setInstallPromptEvent(e);
@@ -81,11 +99,26 @@ export default function App() {
     window.addEventListener('beforeinstallprompt', handleInstallPrompt);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      clearInterval(intervalId);
       window.removeEventListener('beforeinstallprompt', handleInstallPrompt);
     };
   }, []);
+  
+  // --- Sync on Reconnect ---
+  useEffect(() => {
+    // If status changed from offline to online
+    if (isOnline && !wasOnline.current) {
+      const { syncQueue } = useStore.getState();
+      if (syncQueue.length > 0) {
+        addToast({ title: 'Back Online!', message: `Syncing ${syncQueue.length} offline items.`, icon: 'cloud_sync' });
+        syncProgress();
+      } else {
+        addToast({ title: 'Back Online!', message: 'Your connection is restored.', icon: 'wifi' });
+      }
+    }
+    wasOnline.current = isOnline;
+  }, [isOnline]);
+
   
   // --- Voice Commands Effect ---
   useEffect(() => {

@@ -5,7 +5,9 @@
 import {useState, useEffect, useRef} from 'react';
 import c from 'clsx';
 import useStore from '../lib/store';
-import { logout, setSpeechSetting, addToast, goToAdminPanel, toggleVoiceCommands } from '../lib/actions';
+import { logout, setSpeechSetting, addToast, goToAdminPanel, toggleVoiceCommands, promptToInstall } from '../lib/actions';
+import Logo from './Logo';
+import AboutModal from './AboutModal';
 
 function VoiceCommandHelpModal({ onClose }) {
   return (
@@ -60,10 +62,42 @@ function DropdownToggleItem({ id, icon, label, checked, onChange }) {
   );
 }
 
+function DropdownSelectItem({ icon, label, value, onChange, children }) {
+  return (
+    <li className="dropdown-item-select">
+      <label className="dropdown-item-label">
+        <span className="icon">{icon}</span> {label}
+      </label>
+      <select value={value} onChange={onChange}>
+        {children}
+      </select>
+    </li>
+  );
+}
+
+function DropdownSliderItem({ icon, label, value, onChange, min, max, step }) {
+    return (
+        <li className="dropdown-item-slider">
+            <label className="dropdown-item-label">
+                <span className="icon">{icon}</span> {label} ({value.toFixed(1)}x)
+            </label>
+            <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={value}
+                onChange={onChange}
+            />
+        </li>
+    );
+}
+
 export default function Header({ isDark, toggleTheme }) {
-  const { user, speechSettings, installPromptEvent, voiceCommandState } = useStore();
+  const { user, speechSettings, installPromptEvent, installPromptDismissed, voiceCommandState } = useStore();
   const [showProfile, setShowProfile] = useState(false);
   const [showVoiceHelp, setShowVoiceHelp] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [voices, setVoices] = useState([]);
   const profileRef = useRef(null);
   
@@ -130,47 +164,14 @@ export default function Header({ isDark, toggleTheme }) {
   return (
     <>
       <header>
-        <h1>Echo Expedition 🚀</h1>
+        <h1><Logo />Echo Expedition</h1>
         <div className="header-controls">
-          {voices.length > 0 && (
-            <div className="speech-controls">
-              <div className="select-wrapper">
-                <span className="icon">record_voice_over</span>
-                <select
-                  aria-label="Select voice"
-                  value={speechSettings.voice || ''}
-                  onChange={(e) => setSpeechSetting('voice', e.target.value)}
-                >
-                  <option value="">Default Voice</option>
-                  {voices.map((voice) => (
-                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                      {voice.name} ({voice.lang})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="slider-wrapper">
-                <span className="icon">speed</span>
-                <input
-                  type="range"
-                  min="0.5"
-                  max="2"
-                  step="0.1"
-                  aria-label="Speech rate"
-                  value={speechSettings.rate}
-                  onChange={(e) => setSpeechSetting('rate', parseFloat(e.target.value))}
-                />
-                <span>{speechSettings.rate.toFixed(1)}x</span>
-              </div>
-            </div>
-          )}
-        
           <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
             <span className="icon">{isDark ? 'light_mode' : 'dark_mode'}</span>
           </button>
           
-          {installPromptEvent && (
-            <button className="icon-button" onClick={() => { if(installPromptEvent) installPromptEvent.prompt(); }} aria-label="Install app" title="Install App">
+          {installPromptEvent && !installPromptDismissed && (
+            <button className="icon-button" onClick={promptToInstall} aria-label="Install app" title="Install App">
               <span className="icon">install_desktop</span>
             </button>
           )}
@@ -188,6 +189,30 @@ export default function Header({ isDark, toggleTheme }) {
               </button>
               <div className={c('profile-dropdown', { active: showProfile })}>
                 <ul>
+                   <div className="divider"></div>
+                   <li className="dropdown-header">Speech Settings</li>
+                   {voices.length > 0 && (
+                     <DropdownSelectItem
+                        icon="record_voice_over"
+                        label="Voice"
+                        value={speechSettings.voice || ''}
+                        onChange={(e) => setSpeechSetting('voice', e.target.value)}
+                     >
+                       <option value="">Default Voice</option>
+                       {voices.map((voice) => (
+                         <option key={voice.voiceURI} value={voice.voiceURI}>
+                           {voice.name} ({voice.lang})
+                         </option>
+                       ))}
+                     </DropdownSelectItem>
+                   )}
+                   <DropdownSliderItem
+                      icon="speed"
+                      label="Speed"
+                      value={speechSettings.rate}
+                      onChange={(e) => setSpeechSetting('rate', parseFloat(e.target.value))}
+                      min="0.5" max="2" step="0.1"
+                   />
                    <DropdownToggleItem
                     id="autoplay-toggle"
                     icon="autoplay"
@@ -195,6 +220,9 @@ export default function Header({ isDark, toggleTheme }) {
                     checked={speechSettings.autoPlayPrompts}
                     onChange={() => setSpeechSetting('autoPlayPrompts', !speechSettings.autoPlayPrompts)}
                   />
+
+                  <div className="divider"></div>
+                  <li className="dropdown-header">App Controls</li>
                   <DropdownToggleItem
                     id="voice-command-toggle"
                     icon="mic"
@@ -205,6 +233,11 @@ export default function Header({ isDark, toggleTheme }) {
                   <li>
                     <button onClick={() => { setShowVoiceHelp(true); setShowProfile(false); }}>
                       <span className="icon">help_outline</span> Voice Command Help
+                    </button>
+                  </li>
+                   <li>
+                    <button onClick={() => { setShowAbout(true); setShowProfile(false); }}>
+                        <span className="icon">info</span> About App
                     </button>
                   </li>
                   <li>
@@ -234,6 +267,7 @@ export default function Header({ isDark, toggleTheme }) {
         </div>
       </header>
       {showVoiceHelp && <VoiceCommandHelpModal onClose={() => setShowVoiceHelp(false)} />}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </>
   );
 }

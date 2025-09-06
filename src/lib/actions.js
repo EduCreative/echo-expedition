@@ -138,10 +138,17 @@ const initializeMedia = async () => {
 initializeMedia();
 
 // --- Auth & Navigation ---
-const initialUserStats = { xp: 0, level: 1 };
+const initialUserProgress = {
+    progress: {},
+    dailyStreak: { count: 0, lastUpdated: null },
+    achievements: [],
+    pronunciationRaceHighScore: 0,
+    listeningDrillHighScore: 0,
+    user: { xp: 0, level: 1 },
+};
 
 const loginUser = (googleProfile) => {
-    const { allUsers, progress } = get();
+    const { allUsers, allUserProgress } = get();
     let userInSystem = allUsers.find(u => u.email === googleProfile.email);
     let isNewUser = false;
 
@@ -151,6 +158,7 @@ const loginUser = (googleProfile) => {
             id: allUsers.length > 0 ? Math.max(...allUsers.map(u => u.id)) + 1 : 1,
             name: googleProfile.name,
             email: googleProfile.email,
+            picture: googleProfile.picture,
             registrationDate: new Date().toISOString(),
             lastLogin: new Date().toISOString(),
             lessonsCompleted: 0,
@@ -161,46 +169,28 @@ const loginUser = (googleProfile) => {
         set(state => { state.allUsers.push(newUser); });
         userInSystem = newUser;
     } else {
-        // Update last login for existing user
+        // Update last login and picture for existing user
         set(state => {
             const user = state.allUsers.find(u => u.id === userInSystem.id);
             if (user) {
                 user.lastLogin = new Date().toISOString();
+                user.picture = googleProfile.picture;
             }
         });
     }
-
-    const hasProgress = Object.keys(progress).length > 0;
     
-    if (isNewUser) {
-        // For a new user, reset all progress-related state to ensure a clean slate.
-        set({
-            progress: {},
-            dailyStreak: { count: 0, lastUpdated: null },
-            achievements: [],
-            user: { ...initialUserStats, name: googleProfile.name, avatar: googleProfile.picture, email: googleProfile.email },
-            showOnboarding: true,
-            pronunciationRaceHighScore: 0,
-            listeningDrillHighScore: 0,
+    // If the user is new to our progress tracking system, create an entry for them.
+    if (!allUserProgress[userInSystem.email]) {
+        set(state => {
+            state.allUserProgress[userInSystem.email] = { ...initialUserProgress };
         });
-    } else {
-        // For an existing user, we keep their progress that's already in the store
-        // from zustand/persist and just update their identity.
-        set({
-            user: { 
-                ...(get().user || initialUserStats), // Preserve existing xp/level
-                name: userInSystem.name, 
-                avatar: googleProfile.picture, 
-                email: userInSystem.email 
-            },
-            showOnboarding: !hasProgress, // Show onboarding if they exist but have no progress
-            pronunciationRaceHighScore: userInSystem.pronunciationRaceHighScore || 0,
-            listeningDrillHighScore: userInSystem.listeningDrillHighScore || 0,
-        });
+        isNewUser = true; // Treat as new user for onboarding purposes
     }
-
-    set({ view: 'dashboard' });
+    
+    set({ activeUserEmail: userInSystem.email, showOnboarding: isNewUser });
+    get().loadActiveUser();
 };
+
 
 export const handleGoogleLogin = (response) => {
   try {
@@ -217,40 +207,28 @@ export const handleGoogleLogin = (response) => {
   }
 };
 
-const performGuestLogin = (userProfile) => {
-    // Reset state for a clean guest session
-    set({
-        user: { ...initialUserStats, ...userProfile },
-        view: 'dashboard',
-        showOnboarding: true,
-        progress: {},
-        dailyStreak: { count: 0, lastUpdated: null },
-        achievements: [],
-        pronunciationRaceHighScore: 0,
-        listeningDrillHighScore: 0,
-    });
+const performGuestLogin = () => {
+    const guestEmail = 'guest@example.com';
+    const { allUserProgress } = get();
+
+    // Ensure a progress object exists for the guest user
+    if (!allUserProgress[guestEmail]) {
+      set(state => {
+        state.allUserProgress[guestEmail] = { ...initialUserProgress };
+      });
+    }
+
+    set({ activeUserEmail: guestEmail, showOnboarding: true });
+    get().loadActiveUser();
 };
 
-export const continueAsGuest = () => performGuestLogin({ name: 'Guest', avatar: null, email: 'guest@example.com' });
+export const continueAsGuest = () => performGuestLogin();
 
 export const logout = () => {
-    // Clear all user-specific data from the store on logout.
-    set({
-        view: 'login',
-        user: null,
-        progress: {},
-        currentLesson: null,
-        currentStreak: 0,
-        dailyStreak: { count: 0, lastUpdated: null },
-        achievements: [],
-        toasts: [],
-        pronunciationRaceHighScore: 0,
-        listeningDrillHighScore: 0,
-        pronunciationRaceState: { isActive: false, words: [], currentWordIndex: 0, streak: 0, lives: 3, lastResult: null },
-        listeningDrillState: { isActive: false, sentences: [], currentSentenceIndex: 0, streak: 0, lives: 3, lastResult: null },
-        conversationState: { isActive: false, chatHistory: [] },
-    });
+    get().clearSession(); // Resets all session state to initial values
+    set({ activeUserEmail: null }); // Clears persisted active user
 };
+
 
 export const goToDashboard = () => {
     endPronunciationRace(false);
@@ -491,21 +469,21 @@ export const startPronunciationRace = () => {
 }
 
 const endPronunciationRace = (updateHighScore = true) => {
-    const { streak, isActive } = get().pronunciationRaceState;
-    if (!isActive) return;
+    const { pronunciationRaceState, activeUserEmail } = get();
+    if (!pronunciationRaceState.isActive) return;
 
-    if (updateHighScore) {
-      const currentHighScore = get().pronunciationRaceHighScore;
-      const currentUser = get().user;
-      if (streak > currentHighScore) {
-        set(state => {
-            state.pronunciationRaceHighScore = streak;
-            const userInLeaderboard = state.allUsers.find(u => u.email === currentUser.email);
-            if (userInLeaderboard) {
-                userInLeaderboard.pronunciationRaceHighScore = streak;
-            }
-        });
-      }
+    if (updateHighScore && activeUserEmail) {
+      set(state => {
+          const userProgress = state.allUserProgress[activeUserEmail];
+          if (userProgress && pronunciationRaceState.streak > userProgress.pronunciationRaceHighScore) {
+              userProgress.pronunciationRaceHighScore = pronunciationRaceState.streak;
+              state.pronunciationRaceHighScore = pronunciationRaceState.streak; // Update session state
+              const userInLeaderboard = state.allUsers.find(u => u.email === activeUserEmail);
+              if (userInLeaderboard) {
+                  userInLeaderboard.pronunciationRaceHighScore = pronunciationRaceState.streak;
+              }
+          }
+      });
     }
 };
 
@@ -582,20 +560,20 @@ export const startListeningDrill = () => {
 };
 
 const endListeningDrill = (updateHighScore = true) => {
-    const { streak, isActive } = get().listeningDrillState;
-    if (!isActive) return;
-    if (updateHighScore) {
-        const currentHighScore = get().listeningDrillHighScore;
-        const currentUser = get().user;
-        if (streak > currentHighScore) {
-            set(state => {
-                state.listeningDrillHighScore = streak;
-                const userInLeaderboard = state.allUsers.find(u => u.email === currentUser.email);
+    const { listeningDrillState, activeUserEmail } = get();
+    if (!listeningDrillState.isActive) return;
+    if (updateHighScore && activeUserEmail) {
+        set(state => {
+            const userProgress = state.allUserProgress[activeUserEmail];
+            if (userProgress && listeningDrillState.streak > userProgress.listeningDrillHighScore) {
+                userProgress.listeningDrillHighScore = listeningDrillState.streak;
+                state.listeningDrillHighScore = listeningDrillState.streak; // Update session
+                const userInLeaderboard = state.allUsers.find(u => u.email === activeUserEmail);
                 if (userInLeaderboard) {
-                    userInLeaderboard.listeningDrillHighScore = streak;
+                    userInLeaderboard.listeningDrillHighScore = listeningDrillState.streak;
                 }
-            });
-        }
+            }
+        });
     }
 };
 
@@ -745,60 +723,104 @@ const getFeedbackFromAI = async (prompt, schema, audioData) => {
 };
 
 const updateStreak = () => {
+  const { activeUserEmail } = get();
+  if (!activeUserEmail) return;
+
   set(state => {
-    const today = new Date().toDateString();
-    const lastUpdated = state.dailyStreak.lastUpdated;
+    const userProgress = state.allUserProgress[activeUserEmail];
+    if (userProgress) {
+      const today = new Date().toDateString();
+      const lastUpdated = userProgress.dailyStreak.lastUpdated;
 
-    if (lastUpdated !== today) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
+      if (lastUpdated !== today) {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
 
-      if (lastUpdated === yesterday.toDateString()) {
-        state.dailyStreak.count += 1; // Continue streak
-      } else {
-        state.dailyStreak.count = 1; // Reset streak
+        if (lastUpdated === yesterday.toDateString()) {
+          userProgress.dailyStreak.count += 1; // Continue streak
+        } else {
+          userProgress.dailyStreak.count = 1; // Reset streak
+        }
+        userProgress.dailyStreak.lastUpdated = today;
       }
-      state.dailyStreak.lastUpdated = today;
+      // Also update session state for immediate UI reflection
+      state.dailyStreak = userProgress.dailyStreak;
     }
   });
 };
 
 const checkForAchievements = () => {
-  const currentState = get();
-  for (const achievement of achievements) {
-    if (!currentState.achievements.includes(achievement.id)) {
-      if (achievement.check(currentState)) {
-        set(state => { state.achievements.push(achievement.id); });
-        addToast({
-          title: 'Achievement Unlocked!',
-          message: achievement.name,
-          icon: achievement.icon
-        });
-      }
+    const { activeUserEmail } = get();
+    if (!activeUserEmail) return;
+    
+    // Create a snapshot of the current state to pass to the check functions
+    const stateSnapshot = get();
+    const userProgress = stateSnapshot.allUserProgress[activeUserEmail];
+
+    for (const achievement of achievements) {
+        if (!userProgress.achievements.includes(achievement.id)) {
+            // The check function needs a state object that looks like the old one
+            const checkState = {
+                progress: userProgress.progress,
+                dailyStreak: userProgress.dailyStreak,
+                achievements: userProgress.achievements,
+                currentLesson: stateSnapshot.currentLesson,
+            };
+
+            if (achievement.check(checkState)) {
+                set(state => {
+                    const progressToUpdate = state.allUserProgress[activeUserEmail];
+                    if (progressToUpdate) {
+                        progressToUpdate.achievements.push(achievement.id);
+                        state.achievements = progressToUpdate.achievements; // Update session
+                    }
+                });
+                addToast({
+                    title: 'Achievement Unlocked!',
+                    message: achievement.name,
+                    icon: achievement.icon
+                });
+            }
+        }
     }
-  }
 };
 
 const handleScoringAndProgress = (contentScore, isCustom, levelId, lessonId) => {
-  const streak = get().currentStreak;
-  const comboBonus = contentScore * streak * COMBO_BONUS_MULTIPLIER;
-  const xpGained = Math.round(contentScore + comboBonus);
+  const { activeUserEmail } = get();
+  if (!activeUserEmail) return 0;
+  
+  let xpGained = 0;
 
   set(state => {
+    // 1. Update streak in session state
     if (contentScore >= STREAK_THRESHOLD) state.currentStreak += 1;
     else state.currentStreak = 0;
 
-    const currentBestScore = state.progress[levelId]?.[lessonId];
-    if (isCustom || currentBestScore === undefined || contentScore > currentBestScore) {
-      state.user.xp += xpGained;
-      if (!isCustom) {
-        if (!state.progress[levelId]) state.progress[levelId] = {};
-        state.progress[levelId][lessonId] = contentScore;
-      }
-      const xpForNextLevel = state.user.level * XP_PER_LEVEL;
-      if (state.user.xp >= xpForNextLevel) {
-        state.user.level += 1;
-        state.user.xp -= xpForNextLevel;
+    const comboBonus = contentScore * state.currentStreak * COMBO_BONUS_MULTIPLIER;
+    
+    // 2. Update persisted user progress
+    const userProgress = state.allUserProgress[activeUserEmail];
+    if (userProgress) {
+      const currentBestScore = userProgress.progress[levelId]?.[lessonId];
+      if (isCustom || currentBestScore === undefined || contentScore > currentBestScore) {
+        const calculatedXp = Math.round(contentScore + comboBonus);
+        xpGained = calculatedXp;
+        userProgress.user.xp += calculatedXp;
+
+        if (!isCustom) {
+          if (!userProgress.progress[levelId]) userProgress.progress[levelId] = {};
+          userProgress.progress[levelId][lessonId] = contentScore;
+        }
+
+        const xpForNextLevel = userProgress.user.level * XP_PER_LEVEL;
+        if (userProgress.user.xp >= xpForNextLevel) {
+          userProgress.user.level += 1;
+          userProgress.user.xp -= xpForNextLevel;
+        }
+        
+        // 3. Sync updates to session state for immediate UI reflection
+        state.user = { ...state.user, ...userProgress.user };
+        state.progress = { ...userProgress.progress };
       }
     }
   });
@@ -811,6 +833,7 @@ const handleScoringAndProgress = (contentScore, isCustom, levelId, lessonId) => 
 
   return xpGained;
 };
+
 
 export const processRecording = async (transcript, audioData, lessonState) => {
   const { isOnline, pronunciationRaceState, conversationState } = get();
@@ -926,8 +949,8 @@ const processOffline = (transcript, audioData, lessonState) => {
 };
 
 export const syncProgress = async () => {
-    const { syncQueue, isOnline } = get();
-    if (!isOnline || syncQueue.length === 0) return;
+    const { syncQueue, isOnline, activeUserEmail } = get();
+    if (!isOnline || syncQueue.length === 0 || !activeUserEmail) return;
 
     set({ isSyncing: true, error: null });
 
@@ -961,16 +984,13 @@ export const syncProgress = async () => {
             const audioData = { data: audioBase64, mimeType: audioMimeType };
             const { prompt, schema } = getFeedbackPrompt(lessonType, context, transcript);
             const result = await getFeedbackFromAI(prompt, schema, audioData);
-            const xpGained = handleScoringAndProgress(result.score, isCustom, levelId, lessonId);
+            handleScoringAndProgress(result.score, isCustom, levelId, lessonId);
 
-            // Important: We need to update the *persisted* user progress, not just in-memory `currentLesson`.
-            // The user might not be on the exercise screen when syncing.
-            // For now, let's just log it. A more complex app might update a DB.
             console.log(`Synced: ${levelId}/${lessonId}/${promptIndex}. Score: ${result.score}`);
         } catch (e) {
             console.error('Failed to sync an item:', e);
             // Optional: add item back to queue for retry
-            // set(state => { state.syncQueue.unshift(item); });
+            set(state => { state.syncQueue.unshift(item); });
         }
     }
 
@@ -990,6 +1010,10 @@ export const suspendUser = (userId) => {
 export const deleteUser = (userId, userName) => {
     if (window.confirm(`Are you sure you want to permanently delete user: ${userName}? This action cannot be undone.`)) {
         set(state => {
+            const userToDelete = state.allUsers.find(u => u.id === userId);
+            if (userToDelete && state.allUserProgress[userToDelete.email]) {
+              delete state.allUserProgress[userToDelete.email];
+            }
             state.allUsers = state.allUsers.filter(u => u.id !== userId);
         });
     }
@@ -998,11 +1022,16 @@ export const deleteUser = (userId, userName) => {
 export const resetUserProgress = (userId, userName) => {
     if (window.confirm(`Are you sure you want to reset all progress for user: ${userName}?`)) {
         set(state => {
-            const user = state.allUsers.find(u => u.id === userId);
-            if (user) {
-                user.lessonsCompleted = 0;
-                // In a real app, you'd also reset their 'progress' object, etc.
-                // For this mock, just resetting the count is sufficient.
+            const userToReset = state.allUsers.find(u => u.id === userId);
+            if (userToReset) {
+                userToReset.lessonsCompleted = 0;
+                if (state.allUserProgress[userToReset.email]) {
+                    state.allUserProgress[userToReset.email] = { ...initialUserProgress };
+                }
+                // If this is the currently active user, we must also reset their session.
+                if (state.activeUserEmail === userToReset.email) {
+                    state.loadActiveUser();
+                }
             }
         });
     }
