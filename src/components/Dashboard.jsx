@@ -1,0 +1,284 @@
+
+
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+*/
+import { useState, useMemo, useEffect, useRef } from 'react';
+import useStore from '../lib/store';
+import { startCustomLesson, syncProgress, startPronunciationRace, startListeningDrill, startConversation, goToLeaderboard } from '../lib/actions';
+import ExpeditionMap from './ExpeditionMap';
+import InstallPrompt from './InstallPrompt';
+import Onboarding from './Onboarding';
+import c from 'clsx';
+import { achievements } from '../lib/achievements';
+
+const XP_PER_LEVEL = 500;
+
+function SyncManager() {
+  const { isOnline, lastSynced, syncQueue, isSyncing } = useStore();
+  const itemsToSyncCount = syncQueue.length;
+  const [justSynced, setJustSynced] = useState(false);
+  const prevLastSynced = useRef(lastSynced);
+
+  useEffect(() => {
+    // When lastSynced updates, trigger a brief visual confirmation.
+    if (lastSynced && lastSynced !== prevLastSynced.current) {
+      setJustSynced(true);
+      const timer = setTimeout(() => {
+        setJustSynced(false);
+      }, 1500); // Animation duration
+      return () => clearTimeout(timer);
+    }
+    prevLastSynced.current = lastSynced;
+  }, [lastSynced]);
+
+
+  return (
+    <div className={c('sync-manager', { online: isOnline, offline: !isOnline, syncing: isSyncing })}>
+      <div className="sync-status">
+        <span className="status-indicator"></span>
+        <span className="status-text">{isOnline ? 'Online' : 'Offline Mode'}</span>
+      </div>
+      <div className={c('sync-details', { 'just-synced': justSynced })}>
+        {itemsToSyncCount > 0 && <span className="icon unsynced-icon" title={`${itemsToSyncCount} item(s) pending sync`}>sync_problem</span>}
+        <span>{lastSynced ? `Last synced: ${new Date(lastSynced).toLocaleTimeString()}` : 'Not synced yet.'}</span>
+      </div>
+      <button 
+        className="button"
+        onClick={syncProgress}
+        disabled={!isOnline || itemsToSyncCount === 0 || isSyncing}
+      >
+        <span className="icon">{isSyncing ? 'sync' : 'cloud_upload'}</span>
+        {isSyncing 
+          ? 'Syncing...' 
+          : `Sync Now (${itemsToSyncCount})`}
+      </button>
+    </div>
+  );
+}
+
+function PronunciationRaceWidget() {
+    const { isProcessing, isOnline, pronunciationRaceHighScore } = useStore();
+    return (
+        <div className="pronunciation-race-widget">
+            <div className="widget-header">
+                <h3><span className="icon">timer</span> Pronunciation Race</h3>
+                <p>Test your accuracy and speed. How long can your streak last?</p>
+            </div>
+            <div className="widget-score">
+                High Score: <strong>🏆 {pronunciationRaceHighScore}</strong>
+            </div>
+            <button
+              className="button primary"
+              onClick={startPronunciationRace}
+              disabled={isProcessing || !isOnline}
+            >
+                Start Race!
+            </button>
+        </div>
+    );
+}
+
+function ListeningDrillWidget() {
+    const { isProcessing, listeningDrillHighScore } = useStore();
+    return (
+        <div className="listening-drill-widget">
+            <div className="widget-header">
+                <h3><span className="icon">hearing</span> Echo Drill</h3>
+                <p>Listen carefully and type what you hear. Train your ear!</p>
+            </div>
+            <div className="widget-score">
+                High Score: <strong>🎯 {listeningDrillHighScore}</strong>
+            </div>
+            <button
+              className="button primary"
+              onClick={startListeningDrill}
+              disabled={isProcessing}
+            >
+                Start Drill
+            </button>
+        </div>
+    );
+}
+
+function FreeFormConversationWidget() {
+    const { isProcessing, isOnline } = useStore();
+    return (
+        <div className="free-form-widget">
+            <div className="widget-header">
+                <h3><span className="icon">forum</span> Chat & Learn</h3>
+                <p>Have an open conversation with the AI on any topic.</p>
+            </div>
+            <p className="widget-score">Practice freely without scores.</p>
+            <button
+              className="button primary"
+              onClick={startConversation}
+              disabled={isProcessing || !isOnline}
+            >
+                Start Chatting
+            </button>
+        </div>
+    );
+}
+
+function LeaderboardWidget() {
+    return (
+        <div className="leaderboard-widget">
+            <div className="widget-header">
+                <h3><span className="icon">leaderboard</span> Compete & Climb</h3>
+                <p>Check the leaderboards to see how you rank against others.</p>
+            </div>
+            <button
+              className="button primary"
+              onClick={goToLeaderboard}
+            >
+                View Leaderboards
+            </button>
+        </div>
+    );
+}
+
+function CustomLessonCreator() {
+  const [topic, setTopic] = useState('');
+  const { isProcessing, isOnline } = useStore();
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (topic.trim() && !isProcessing && isOnline) {
+      startCustomLesson(topic.trim());
+    }
+  };
+
+  return (
+    <div className="custom-lesson-creator">
+      <div className="widget-header">
+        <h3><span className="icon">edit</span> Practice Any Topic</h3>
+        <p>Enter a topic, scenario, or phrase you want to practice.</p>
+      </div>
+      <form onSubmit={handleSubmit} className="custom-lesson-form">
+        <input
+          type="text"
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          placeholder={isOnline ? "e.g., Ordering coffee..." : "Internet connection required"}
+          disabled={isProcessing || !isOnline}
+          aria-label="Custom lesson topic"
+        />
+        <button type="submit" className="button primary" disabled={!topic.trim() || isProcessing || !isOnline}>
+          <span className="icon">auto_awesome</span> Generate
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function UserProfileSummary({ user }) {
+  const xpForNextLevel = user.level * XP_PER_LEVEL;
+  const xpPercentage = (user.xp / xpForNextLevel) * 100;
+
+  return (
+    <div className="user-profile-summary">
+      <div className="level-badge">LVL {user.level}</div>
+      <div className="xp-details">
+        <div className="xp-bar">
+          <div className="xp-bar-inner" style={{ width: `${xpPercentage}%` }}></div>
+        </div>
+        <div className="xp-text">{user.xp} / {xpForNextLevel} XP</div>
+      </div>
+    </div>
+  );
+}
+
+function AchievementsWidget() {
+  const unlockedAchievements = useStore(state => state.achievements);
+
+  return (
+    <div className="achievements-widget">
+       <h3><span className="icon">military_tech</span>Achievements</h3>
+       <div className="achievements-grid">
+        {achievements.map(ach => {
+          const isUnlocked = unlockedAchievements.includes(ach.id);
+          return (
+            <div
+              key={ach.id}
+              className={c('achievement-badge', { unlocked: isUnlocked })}
+              title={`${ach.name}\n${ach.description}`}
+            >
+              <span className="icon">{ach.icon}</span>
+            </div>
+          );
+        })}
+       </div>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const { user, isProcessing, progress, dailyStreak, showOnboarding } = useStore();
+
+  const { totalLessonsCompleted, totalXpEarned } = useMemo(() => {
+    const lessonsCompleted = Object.values(progress).reduce(
+      (acc, levelProgress) => acc + Object.keys(levelProgress).length,
+      0
+    );
+
+    const xpFromLevels = (user.level - 1) * XP_PER_LEVEL;
+    const totalXp = xpFromLevels + user.xp;
+
+    return { totalLessonsCompleted: lessonsCompleted, totalXpEarned: totalXp };
+  }, [progress, user.level, user.xp]);
+
+  if (isProcessing && !useStore.getState().isSyncing) {
+    return (
+      <div className="loader">
+        <span className="icon">hourglass_top</span> Loading...
+      </div>
+    );
+  }
+
+  return (
+    <div className="dashboard">
+      {showOnboarding && <Onboarding />}
+      <div className="dashboard-header">
+        <h2>Welcome back, {user?.name}!</h2>
+        <p>Embark on your expedition to fluency. Complete lessons to unlock new levels.</p>
+        <UserProfileSummary user={user} />
+      </div>
+
+      <div className="dashboard-stats">
+        <div className="stat-item streak">
+          <span className="icon stat-icon">local_fire_department</span>
+          <span className="stat-value">{dailyStreak.count} Day</span>
+          <span className="stat-label">Daily Streak</span>
+        </div>
+        <div className="stat-item">
+          <span className="icon stat-icon">library_books</span>
+          <span className="stat-value">{totalLessonsCompleted}</span>
+          <span className="stat-label">Lessons Completed</span>
+        </div>
+        <div className="stat-item">
+          <span className="icon stat-icon">star</span>
+          <span className="stat-value">{totalXpEarned.toLocaleString()}</span>
+          <span className="stat-label">Total XP Earned</span>
+        </div>
+      </div>
+      
+      <AchievementsWidget />
+      <ExpeditionMap />
+      <SyncManager />
+      
+      <div className="additional-tools">
+        <h3 className="additional-tools-header">Additional Tools for Fluency</h3>
+        <div className="dashboard-widgets">
+          <PronunciationRaceWidget />
+          <ListeningDrillWidget />
+          <FreeFormConversationWidget />
+          <LeaderboardWidget />
+        </div>
+        <CustomLessonCreator />
+      </div>
+      <InstallPrompt />
+    </div>
+  );
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Echo Expedition II : Fluent Frontiers",
+  "description": "An application for English language learners of all levels to improve their listening comprehension, pronunciation, and spoken fluency through AI-powered exercises. GAME VERSION",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
