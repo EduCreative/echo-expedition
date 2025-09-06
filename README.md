@@ -23,8 +23,8 @@ An application for English language learners of all levels to improve their list
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository-url>
-    cd <repository-directory>
+    git clone https://github.com/EduCreative/echo-expedition
+    cd echo-expedition
     ```
 
 2.  **Install dependencies:**
