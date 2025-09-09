@@ -4,7 +4,7 @@
 */
 import { useState, useMemo, useEffect, useRef } from 'react';
 import useStore from '../lib/store';
-import { startCustomLesson, syncProgress, startPronunciationRace, startListeningDrill, startConversation, goToLeaderboard, startPracticeMode } from '../lib/actions';
+import { startCustomLesson, startPronunciationRace, startListeningDrill, startConversation, goToLeaderboard, startPracticeMode } from '../lib/actions';
 import ExpeditionMap from './ExpeditionMap';
 import InstallPrompt from './InstallPrompt';
 import Onboarding from './Onboarding';
@@ -13,49 +13,6 @@ import { achievements } from '../lib/achievements';
 import ConversationStarterModal from './ConversationStarterModal';
 
 const XP_PER_LEVEL = 500;
-
-function SyncManager() {
-  const { isOnline, lastSynced, syncQueue, isSyncing } = useStore();
-  const itemsToSyncCount = syncQueue.length;
-  const [justSynced, setJustSynced] = useState(false);
-  const prevLastSynced = useRef(lastSynced);
-
-  useEffect(() => {
-    // When lastSynced updates, trigger a brief visual confirmation.
-    if (lastSynced && lastSynced !== prevLastSynced.current) {
-      setJustSynced(true);
-      const timer = setTimeout(() => {
-        setJustSynced(false);
-      }, 1500); // Animation duration
-      return () => clearTimeout(timer);
-    }
-    prevLastSynced.current = lastSynced;
-  }, [lastSynced]);
-
-
-  return (
-    <div className={c('sync-manager', { online: isOnline, offline: !isOnline, syncing: isSyncing })}>
-      <div className="sync-status">
-        <span className="status-indicator"></span>
-        <span className="status-text">{isOnline ? 'Online' : 'Offline Mode'}</span>
-      </div>
-      <div className={c('sync-details', { 'just-synced': justSynced })}>
-        {itemsToSyncCount > 0 && <span className="icon unsynced-icon" title={`${itemsToSyncCount} item(s) pending sync`}>sync_problem</span>}
-        <span>{lastSynced ? `Last synced: ${new Date(lastSynced).toLocaleTimeString()}` : 'Not synced yet.'}</span>
-      </div>
-      <button 
-        className="button"
-        onClick={syncProgress}
-        disabled={!isOnline || itemsToSyncCount === 0 || isSyncing}
-      >
-        <span className="icon">{isSyncing ? 'sync' : 'cloud_upload'}</span>
-        {isSyncing 
-          ? 'Syncing...' 
-          : `Sync Now (${itemsToSyncCount})`}
-      </button>
-    </div>
-  );
-}
 
 function PronunciationRaceWidget() {
     const { isProcessing, isOnline, pronunciationRaceHighScore } = useStore();
@@ -198,6 +155,7 @@ function CustomLessonCreator() {
 }
 
 function UserProfileSummary({ user }) {
+  if (!user) return null;
   const xpForNextLevel = user.level * XP_PER_LEVEL;
   const xpPercentage = (user.xp / xpForNextLevel) * 100;
 
@@ -242,6 +200,7 @@ export default function Dashboard() {
   const { user, isProcessing, progress, dailyStreak, showOnboarding } = useStore();
 
   const { totalLessonsCompleted, totalXpEarned } = useMemo(() => {
+    if (!user) return { totalLessonsCompleted: 0, totalXpEarned: 0 };
     const lessonsCompleted = Object.values(progress).reduce(
       (acc, levelProgress) => acc + Object.keys(levelProgress).length,
       0
@@ -251,7 +210,7 @@ export default function Dashboard() {
     const totalXp = xpFromLevels + user.xp;
 
     return { totalLessonsCompleted: lessonsCompleted, totalXpEarned: totalXp };
-  }, [progress, user.level, user.xp]);
+  }, [progress, user]);
 
   if (isProcessing && !useStore.getState().isSyncing) {
     return (
@@ -265,7 +224,7 @@ export default function Dashboard() {
     <div className="dashboard">
       {showOnboarding && <Onboarding />}
       <div className="dashboard-header">
-        <h2>Welcome back, {user?.name}!</h2>
+        <h2>Welcome back, {user?.displayName || 'Explorer'}!</h2>
         <p>Embark on your expedition to fluency. Complete lessons to unlock new levels.</p>
         <UserProfileSummary user={user} />
       </div>
@@ -290,7 +249,6 @@ export default function Dashboard() {
       
       <AchievementsWidget />
       <ExpeditionMap />
-      <SyncManager />
       
       <div className="additional-tools">
         <h3 className="additional-tools-header">Additional Tools for Fluency</h3>

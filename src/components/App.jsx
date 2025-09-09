@@ -17,7 +17,6 @@ import {
   startPronunciationRace,
   changePrompt,
   speakText,
-  syncProgress,
   startPracticeLesson,
 } from '../lib/actions';
 import PronunciationRace from './PronunciationRace';
@@ -28,6 +27,9 @@ import AdminPanel from './AdminPanel';
 import Leaderboard from './Leaderboard';
 import c from 'clsx';
 import { levels } from '../lib/prompts';
+import { auth, db } from '../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 
 // Keep a module-level reference to the recognition instance to persist it across re-renders
 let commandRecognition;
@@ -109,6 +111,8 @@ function ToastContainer() {
   );
 }
 
+const { setUser, clearUserSession, updateProgressFromSnapshot, setUnsubscribe } = useStore.getState();
+
 export default function App() {
   const { view, user, isRecording, voiceCommandState, isOnline } = useStore();
   const [isDark, setIsDark] = useState(true);
@@ -116,7 +120,74 @@ export default function App() {
   const toggleThemeRef = useRef();
   const isCommandRecognitionActive = useRef(false);
   const shouldRestartRecognition = useRef(true);
-  const wasOnline = useRef(navigator.onLine);
+
+  useEffect(() => {
+    // --- Firebase Auth Listener ---
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // User is signed in.
+        const userRef = doc(db, "users", firebaseUser.uid);
+        const userDoc = await getDoc(userRef);
+
+        let showOnboardingFlow = false;
+        
+        if (!userDoc.exists()) {
+          // New user, create documents for them
+          showOnboardingFlow = true;
+          const userData = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || 'Guest User',
+            email: firebaseUser.email,
+            picture: firebaseUser.photoURL,
+            registrationDate: new Date().toISOString(),
+            lastLogin: new Date().toISOString(),
+            status: 'active',
+            hasOnboarded: false,
+          };
+          const progressData = {
+            progress: {},
+            dailyStreak: { count: 0, lastUpdated: null },
+            achievements: [],
+            pronunciationRaceHighScore: 0,
+            listeningDrillHighScore: 0,
+            user: { xp: 0, level: 1 },
+          };
+          await setDoc(userRef, userData);
+          await setDoc(doc(db, "progress", firebaseUser.uid), progressData);
+        } else {
+          // Existing user, update last login
+          await setDoc(userRef, { lastLogin: new Date().toISOString() }, { merge: true });
+          showOnboardingFlow = !userDoc.data().hasOnboarded;
+        }
+
+        // Set user in Zustand store
+        setUser({
+          uid: firebaseUser.uid,
+          displayName: firebaseUser.displayName,
+          photoURL: firebaseUser.photoURL,
+          email: firebaseUser.email,
+          isAnonymous: firebaseUser.isAnonymous,
+        });
+        
+        useStore.setState({ showOnboarding: showOnboardingFlow });
+
+        // Set up real-time listener for user progress
+        const progressRef = doc(db, "progress", firebaseUser.uid);
+        const unsubscribeProgress = onSnapshot(progressRef, (doc) => {
+          if (doc.exists()) {
+            updateProgressFromSnapshot(doc.data());
+          }
+        });
+        setUnsubscribe(unsubscribeProgress);
+
+      } else {
+        // User is signed out.
+        clearUserSession();
+      }
+    });
+    
+    return () => unsubscribeAuth(); // Cleanup subscription on unmount
+  }, []);
 
 
   useEffect(() => {
@@ -128,28 +199,12 @@ export default function App() {
   }, [isDark]);
 
   useEffect(() => {
-    // --- Robust Online Status Check ---
-    const checkOnlineStatus = async () => {
-      try {
-        // A lightweight request to a reliable endpoint is a good way to check for real internet access.
-        // We use no-cors mode because we don't need to read the response, just see if the request succeeds.
-        const response = await fetch('https://www.google.com/generate_204', {
-          method: 'HEAD',
-          mode: 'no-cors',
-          cache: 'no-store',
-        });
-        // Check navigator.onLine as a fallback or for quick changes.
-        setOnlineStatus(navigator.onLine);
-      } catch (error) {
-        // A failed fetch indicates offline status.
-        setOnlineStatus(false);
-      }
-    };
+    const handleOnline = () => setOnlineStatus(true);
+    const handleOffline = () => setOnlineStatus(false);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
-    checkOnlineStatus(); // Check immediately on load
-    const intervalId = setInterval(checkOnlineStatus, 30000); // And every 30 seconds
-
-    // --- PWA Install Prompt ---
     const handleInstallPrompt = (e) => {
       e.preventDefault();
       setInstallPromptEvent(e);
@@ -157,26 +212,11 @@ export default function App() {
     window.addEventListener('beforeinstallprompt', handleInstallPrompt);
 
     return () => {
-      clearInterval(intervalId);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       window.removeEventListener('beforeinstallprompt', handleInstallPrompt);
     };
   }, []);
-  
-  // --- Sync on Reconnect ---
-  useEffect(() => {
-    // If status changed from offline to online
-    if (isOnline && !wasOnline.current) {
-      const { syncQueue } = useStore.getState();
-      if (syncQueue.length > 0) {
-        addToast({ title: 'Back Online!', message: `Syncing ${syncQueue.length} offline items.`, icon: 'cloud_sync' });
-        syncProgress();
-      } else {
-        addToast({ title: 'Back Online!', message: 'Your connection is restored.', icon: 'wifi' });
-      }
-    }
-    wasOnline.current = isOnline;
-  }, [isOnline]);
-
   
   // --- Voice Commands Effect ---
   useEffect(() => {

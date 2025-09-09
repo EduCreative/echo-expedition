@@ -1,0 +1,23 @@
+{
+  "name": "Echo Expedition: English Fluency Frontier",
+  "short_name": "Echo Expedition",
+  "description": "An application for English language learners to improve listening comprehension, pronunciation, and spoken fluency through AI-powered exercises.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#202124",
+  "theme_color": "#202124",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

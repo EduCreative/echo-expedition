@@ -65,3 +65,13 @@ export const translateToUrdu = async (text) => {
 English text: "${text}"`;
   return callApi(prompt);
 };
+
+export const getPhoneticTranscription = async (text) => {
+  if (!text) return '';
+  const prompt = `Provide the International Phonetic Alphabet (IPA) transcription for the following English text.
+Output ONLY the transcription string, without any extra text, labels, or markdown.
+For example, for 'hello', you should output '/həˈloʊ/'.
+
+Text: "${text}"`;
+  return callApi(prompt);
+};

@@ -1,23 +1,68 @@
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import useStore from '../lib/store';
 import { goToDashboard } from '../lib/actions';
 import c from 'clsx';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+
+async function fetchLeaderboardData() {
+    const usersCollection = collection(db, 'users');
+    const progressCollection = collection(db, 'progress');
+
+    const [usersSnapshot, progressSnapshot] = await Promise.all([
+        getDocs(usersCollection),
+        getDocs(progressCollection)
+    ]);
+
+    const usersData = {};
+    usersSnapshot.forEach(doc => {
+        usersData[doc.id] = doc.data();
+    });
+
+    const progressData = {};
+    progressSnapshot.forEach(doc => {
+        progressData[doc.id] = doc.data();
+    });
+
+    // Combine data
+    const combinedData = Object.keys(usersData).map(uid => {
+        return {
+            id: uid,
+            name: usersData[uid].name || 'Anonymous',
+            ...progressData[uid]
+        };
+    });
+
+    return combinedData;
+}
+
 
 export default function Leaderboard() {
   const [activeBoard, setActiveBoard] = useState('race'); // 'race' or 'drill'
-  const { allUsers, user: currentUser } = useStore();
+  const { user: currentUser } = useStore();
+  const [allUsersData, setAllUsersData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+        setIsLoading(true);
+        const data = await fetchLeaderboardData();
+        setAllUsersData(data);
+        setIsLoading(false);
+    }
+    loadData();
+  }, []);
 
   const sortedUsers = useMemo(() => {
     const scoreKey = activeBoard === 'race' ? 'pronunciationRaceHighScore' : 'listeningDrillHighScore';
-    return [...allUsers]
-      .filter(u => u[scoreKey] !== undefined)
-      .sort((a, b) => b[scoreKey] - a[scoreKey]);
-  }, [allUsers, activeBoard]);
+    return [...allUsersData]
+      .filter(u => u[scoreKey] > 0)
+      .sort((a, b) => (b[scoreKey] || 0) - (a[scoreKey] || 0));
+  }, [allUsersData, activeBoard]);
 
   return (
     <div className="leaderboard-view">
@@ -44,28 +89,32 @@ export default function Leaderboard() {
           </div>
         </div>
         
-        <div className="leaderboard-list">
-          <div className="leaderboard-row header">
-            <span className="rank">#</span>
-            <span className="name">Player</span>
-            <span className="score">Score</span>
-          </div>
-          {sortedUsers.map((user, index) => {
-            const isCurrentUser = user.name === currentUser.name;
-            const score = activeBoard === 'race' ? user.pronunciationRaceHighScore : user.listeningDrillHighScore;
-            
-            return (
-              <div key={user.id} className={c('leaderboard-row', { 'current-user': isCurrentUser })}>
-                <span className="rank">{index + 1}</span>
-                <span className="name">
-                  {user.name}
-                  {isCurrentUser && <span className="you-badge">You</span>}
-                </span>
-                <span className="score">{score}</span>
-              </div>
-            );
-          })}
-        </div>
+        {isLoading ? (
+            <div className="loader"><span className="icon">hourglass_top</span> Loading Leaderboard...</div>
+        ) : (
+            <div className="leaderboard-list">
+            <div className="leaderboard-row header">
+                <span className="rank">#</span>
+                <span className="name">Player</span>
+                <span className="score">Score</span>
+            </div>
+            {sortedUsers.map((user, index) => {
+                const isCurrentUser = user.id === currentUser.uid;
+                const score = activeBoard === 'race' ? user.pronunciationRaceHighScore : user.listeningDrillHighScore;
+                
+                return (
+                <div key={user.id} className={c('leaderboard-row', { 'current-user': isCurrentUser })}>
+                    <span className="rank">{index + 1}</span>
+                    <span className="name">
+                    {user.name}
+                    {isCurrentUser && <span className="you-badge">You</span>}
+                    </span>
+                    <span className="score">{score || 0}</span>
+                </div>
+                );
+            })}
+            </div>
+        )}
       </div>
     </div>
   );

@@ -176,12 +176,12 @@ export default function Header({ isDark, toggleTheme }) {
           {user && (
             <div className="user-profile" ref={profileRef}>
               <button className="user-profile-button" onClick={() => setShowProfile(p => !p)}>
-                {user.avatar ? (
-                  <img src={user.avatar} alt="User avatar" className="avatar" />
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="User avatar" className="avatar" />
                 ) : (
                   <div className="avatar"><span className="icon">person</span></div>
                 )}
-                <span className="name">{user.name}</span>
+                <span className="name">{user.displayName || 'Guest'}</span>
                 <span className="icon">arrow_drop_down</span>
               </button>
               <div className={c('profile-dropdown', { active: showProfile })}>
@@ -216,6 +216,13 @@ export default function Header({ isDark, toggleTheme }) {
                     label="Auto-play Prompts"
                     checked={speechSettings.autoPlayPrompts}
                     onChange={() => setSpeechSetting('autoPlayPrompts', !speechSettings.autoPlayPrompts)}
+                  />
+                   <DropdownToggleItem
+                    id="phonetics-toggle"
+                    icon="translate"
+                    label="Show Phonetics (IPA)"
+                    checked={speechSettings.showPhonetics}
+                    onChange={() => setSpeechSetting('showPhonetics', !speechSettings.showPhonetics)}
                   />
 
                   <div className="divider"></div>

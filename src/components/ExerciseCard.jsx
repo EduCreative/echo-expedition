@@ -1,4 +1,5 @@
 
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -7,6 +8,7 @@ import {useRef, useState, useEffect} from 'react';
 import c from 'clsx';
 import useStore from '../lib/store';
 import { startRecording, stopRecording, changePrompt, speakText } from '../lib/actions';
+import { getPhoneticTranscription } from '../lib/llm';
 
 const translations = {
   'Listen & Repeat': 'سنیں اور دہرائیں',
@@ -69,6 +71,9 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
     if (isPlaying) {
       audio.pause();
     } else {
+      if (audio.ended) {
+          audio.currentTime = 0;
+      }
       audio.play();
     }
     setIsPlaying(!isPlaying);
@@ -264,11 +269,57 @@ const HighlightBlank = ({ text }) => {
 
 export default function ExerciseCard() {
   const { currentLesson, isRecording, isProcessing, speechSettings, currentStreak } = useStore();
+  const set = useStore.setState;
+  const [ipa, setIpa] = useState('');
+  const [isLoadingIpa, setIsLoadingIpa] = useState(false);
   
   const { lessonType, isPractice } = currentLesson || {};
   const currentPrompt = (currentLesson?.prompts)
     ? currentLesson.prompts[currentLesson.currentPromptIndex]
     : null;
+
+  useEffect(() => {
+    const isRelevantType = ['sentence', 'fill_in_the_blank', 'sentence_ordering'].includes(lessonType);
+    if (!speechSettings.showPhonetics || !currentPrompt || !isRelevantType) {
+      setIpa('');
+      return;
+    }
+
+    const textForIpa = currentPrompt.correctText || currentPrompt.text;
+    if (!textForIpa) return;
+
+    if (currentPrompt.ipa) {
+      setIpa(currentPrompt.ipa);
+      return;
+    }
+
+    const fetchIpa = async () => {
+      setIsLoadingIpa(true);
+      setIpa('');
+      try {
+        const transcription = await getPhoneticTranscription(textForIpa);
+        setIpa(transcription);
+        
+        set(state => {
+          if (state.currentLesson && state.currentLesson.prompts) {
+            const promptToUpdate = state.currentLesson.prompts[state.currentLesson.currentPromptIndex];
+            if (promptToUpdate) {
+              promptToUpdate.ipa = transcription;
+            }
+          }
+        });
+
+      } catch (error) {
+        console.error("Failed to fetch IPA:", error);
+        setIpa('Could not load phonetics.');
+      } finally {
+        setIsLoadingIpa(false);
+      }
+    };
+
+    fetchIpa();
+
+  }, [currentPrompt, speechSettings.showPhonetics, lessonType, set]);
 
   const handleRecord = () => {
     isRecording ? stopRecording() : startRecording();
@@ -346,6 +397,11 @@ export default function ExerciseCard() {
                 <span className="icon">volume_up</span>
               </button>
             </p>
+            {['sentence', 'fill_in_the_blank', 'sentence_ordering'].includes(lessonType) && speechSettings.showPhonetics && (
+              <div className="phonetic-transcription">
+                {isLoadingIpa ? '...' : ipa}
+              </div>
+            )}
             <div className="prompt-controls">
               <div className="prompt-navigation">
                 <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>

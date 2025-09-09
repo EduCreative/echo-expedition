@@ -1,4 +1,5 @@
 
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -761,6 +762,15 @@ input:checked + .slider:before {
   letter-spacing: 2px;
 }
 
+.phonetic-transcription {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  text-align: center;
+  letter-spacing: 1px;
+  min-height: 27px; /* to prevent layout shift */
+  font-style: italic;
+}
 
 .prompt-controls {
   margin-top: 16px;
