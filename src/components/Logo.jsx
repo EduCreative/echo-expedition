@@ -3,21 +3,68 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
+/**
+ * ## The Message Behind the New Logo
+ * 
+ * I've redesigned the logo to be more symbolic and to visually represent the name "Echo Expedition". 
+ * The new design is sleek, modern, and packed with meaning that reflects the app's core purpose.
+ * 
+ * - **The Speech Bubble:** The foundation of our logo remains the speech bubble, the universal symbol for 
+ *   communication, conversation, and language. It immediately grounds the app in its purpose: helping you 
+ *   master spoken English.
+ * 
+ * - **The Expedition Path & Mountain:** Inside the bubble, you'll now see a stylized mountain range with a 
+ *   path climbing towards the summit. This is the "Expedition." It represents your personal journey from 
+ *   foundational knowledge to the peak of fluency. Each lesson is a step forward on this path, a new 
+ *   height achieved.
+ * 
+ * - **The Echo Waves:** Radiating from the mountain peak are two sound waves. This is the "Echo." They 
+ *   symbolize the app's core mechanic: listening to a prompt (the sound) and repeating it (creating an echo). 
+ *   It’s through this cycle of listening, speaking, and receiving feedback that your pronunciation and 
+ *   confidence grow.
+ * 
+ * Together, the new logo tells the story of a guided journey. It visually communicates that Echo Expedition 
+ * is your partner in the adventure of mastering English, turning every word you speak into a confident step 
+ * towards the summit of fluency.
+ */
 export default function Logo() {
   return (
     <svg
       className="logo-svg"
       viewBox="0 0 24 24"
-      fill="currentColor"
       xmlns="http://www.w3.org/2000/svg"
+      aria-labelledby="logoTitle"
+      role="img"
     >
-      <path 
-        fillRule="evenodd" 
-        clipRule="evenodd" 
-        d="M3.408 4.342c0-1.32 1.074-2.392 2.395-2.392h12.394c1.32 0 2.395 1.072 2.395 2.392v10.3c0 1.32-1.075 2.392-2.395 2.392H7.933L3.408 21.4V4.342zm2.395-.892a.896.896 0 0 0-.896.892v14.45l3.227-2.934A.897.897 0 0 1 8.77 16.03h9.422a.896.896 0 0 0 .896-.892v-10.3a.896.896 0 0 0-.896-.892H5.803z"
-      />
-      <path d="M11.5 13.5a1 1 0 0 1-1-1v-4l-1.724 1.293a.5.5 0 1 1-.552-.832l2.5-1.875a.5.5 0 0 1 .552 0l2.5 1.875a.5.5 0 1 1-.552.832L12.5 8.5v4a1 1 0 0 1-1 1z" />
-      <path d="M12.5 14.5h-2a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1z" />
+      <title id="logoTitle">Echo Expedition Logo</title>
+      <g>
+        {/* Speech Bubble Outline */}
+        <path
+          className="logo-primary"
+          d="M21 2H5a2 2 0 00-2 2v10a2 2 0 002 2h12l4 4V4a2 2 0 00-2-2z"
+        />
+        {/* Mountain Shape */}
+        <path
+          className="logo-secondary"
+          d="M7 14s1.5-2 3-2 3 2 3 2l3-2.5s1.5 1.5 3 0v2H7v-2z"
+        />
+        {/* Expedition Path */}
+        <path
+          className="logo-accent-stroke"
+          strokeLinecap="round"
+          strokeWidth="1.5"
+          fill="none"
+          d="M7 12l3-3 3 2 3-3"
+        />
+        {/* Echo Waves */}
+        <path
+          className="logo-secondary-stroke"
+          strokeLinecap="round"
+          strokeWidth="1.5"
+          fill="none"
+          d="M16 6a3 3 0 010 4M18 4a6 6 0 010 8"
+        />
+      </g>
     </svg>
   );
 }

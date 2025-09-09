@@ -5,7 +5,7 @@
 import {create} from 'zustand';
 import {immer} from 'zustand/middleware/immer';
 import { persist } from 'zustand/middleware';
-import { mockUsers } from './mock-users';
+import { masterData } from './master-data';
 
 const initialSessionState = {
   view: 'login',
@@ -21,10 +21,10 @@ const initialSessionState = {
   toasts: [],
   pronunciationRaceState: { isActive: false, words: [], currentWordIndex: 0, streak: 0, lives: 3, lastResult: null },
   listeningDrillState: { isActive: false, sentences: [], currentSentenceIndex: 0, streak: 0, lives: 3, lastResult: null },
-  conversationState: { isActive: false, chatHistory: [] },
+  conversationState: { isActive: false, chatHistory: [], scenarioTitle: null },
   isOnline: navigator.onLine,
   lastSynced: null,
-  syncQueue: [], 
+  // syncQueue is now persisted, but we reset it in the initial session state
   isSyncing: false,
   installPromptEvent: null,
   installPromptDismissed: false,
@@ -40,18 +40,26 @@ const useStore = create(
   persist(
     immer((set, get) => ({
       // --- PERSISTED STATE ---
-      // This will hold the progress for all users, keyed by email
-      allUserProgress: {}, // e.g., { 'user@email.com': { progress: {...}, dailyStreak: {...}, etc. } }
-      allUsers: mockUsers,
       activeUserEmail: null,
+      allUserProgress: masterData.progress,
+      syncQueue: [], 
       
-      // --- SESSION STATE (not persisted) ---
+      // --- "DATABASE" STATE (not persisted, lives for the session) ---
+      // Initialized from a single master source to simulate a central DB
+      allUsers: masterData.users,
+
+      // --- SESSION STATE (transient, per-user) ---
       ...initialSessionState,
       
       // --- ACTIONS ---
       loadActiveUser: () => set(state => {
         const email = state.activeUserEmail;
-        if (!email) return;
+        if (!email) {
+            // No user, reset session state to default but keep DB state
+            Object.assign(state, initialSessionState);
+            state.view = 'login';
+            return;
+        }
 
         const userData = state.allUserProgress[email];
         const userInfo = state.allUsers.find(u => u.email === email);
@@ -72,31 +80,30 @@ const useStore = create(
         } else {
           // Data inconsistency, log out
           state.activeUserEmail = null;
-          state.user = null;
+          Object.assign(state, initialSessionState); // Reset session state
           state.view = 'login';
         }
       }),
 
-      clearSession: () => set(initialSessionState),
+      clearSession: () => set(state => {
+        // Resets the active user's session state, but leaves the "DB" state intact.
+        Object.assign(state, initialSessionState);
+      }),
 
     })),
     {
       name: 'echo-expedition-storage',
-      // Only persist these specific slices of state to localStorage
+      // Persist the user's email, all their progress data, and any pending sync items.
       partialize: (state) => ({ 
-        allUserProgress: state.allUserProgress,
-        allUsers: state.allUsers,
         activeUserEmail: state.activeUserEmail,
+        allUserProgress: state.allUserProgress,
+        syncQueue: state.syncQueue,
       }),
       onRehydrateStorage: () => (state) => {
+        // On app load, if we have a persisted email, load that user's session data.
+        // The persisted `allUserProgress` and `syncQueue` are automatically rehydrated.
         if (state) {
-          if (!state.allUsers || state.allUsers.length === 0) {
-            state.allUsers = mockUsers;
-          }
-          // On app load, if we know who was logged in last, automatically load their session
-          if (state.activeUserEmail) {
-            state.loadActiveUser();
-          }
+          state.loadActiveUser();
         }
       },
     }

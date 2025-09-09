@@ -1,17 +1,16 @@
-
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
 import { useState, useMemo, useEffect, useRef } from 'react';
 import useStore from '../lib/store';
-import { startCustomLesson, syncProgress, startPronunciationRace, startListeningDrill, startConversation, goToLeaderboard } from '../lib/actions';
+import { startCustomLesson, syncProgress, startPronunciationRace, startListeningDrill, startConversation, goToLeaderboard, startPracticeMode } from '../lib/actions';
 import ExpeditionMap from './ExpeditionMap';
 import InstallPrompt from './InstallPrompt';
 import Onboarding from './Onboarding';
 import c from 'clsx';
 import { achievements } from '../lib/achievements';
+import ConversationStarterModal from './ConversationStarterModal';
 
 const XP_PER_LEVEL = 500;
 
@@ -102,23 +101,48 @@ function ListeningDrillWidget() {
     );
 }
 
-function FreeFormConversationWidget() {
-    const { isProcessing, isOnline } = useStore();
+function PracticeModeWidget() {
+    const { isProcessing } = useStore();
     return (
-        <div className="free-form-widget">
+        <div className="practice-mode-widget">
             <div className="widget-header">
-                <h3><span className="icon">forum</span> Chat & Learn</h3>
-                <p>Have an open conversation with the AI on any topic.</p>
+                <h3><span className="icon">fitness_center</span> Practice Sandbox</h3>
+                <p>Revisit any lesson without pressure. Your scores won't be saved.</p>
             </div>
-            <p className="widget-score">Practice freely without scores.</p>
+            <p className="widget-score">Perfect for focused skill-building.</p>
             <button
               className="button primary"
-              onClick={startConversation}
-              disabled={isProcessing || !isOnline}
+              onClick={startPracticeMode}
+              disabled={isProcessing}
             >
-                Start Chatting
+                Start Practice
             </button>
         </div>
+    );
+}
+
+function FreeFormConversationWidget() {
+    const { isProcessing, isOnline } = useStore();
+    const [isModalOpen, setIsModalOpen] = useState(false);
+
+    return (
+        <>
+            <div className="free-form-widget">
+                <div className="widget-header">
+                    <h3><span className="icon">forum</span> Chat & Learn</h3>
+                    <p>Have a guided or open conversation with the AI on any topic.</p>
+                </div>
+                <p className="widget-score">Practice freely without scores.</p>
+                <button
+                className="button primary"
+                onClick={() => setIsModalOpen(true)}
+                disabled={isProcessing || !isOnline}
+                >
+                    Choose a Scenario
+                </button>
+            </div>
+            {isModalOpen && <ConversationStarterModal onClose={() => setIsModalOpen(false)} />}
+        </>
     );
 }
 
@@ -273,6 +297,7 @@ export default function Dashboard() {
         <div className="dashboard-widgets">
           <PronunciationRaceWidget />
           <ListeningDrillWidget />
+          <PracticeModeWidget />
           <FreeFormConversationWidget />
           <LeaderboardWidget />
         </div>

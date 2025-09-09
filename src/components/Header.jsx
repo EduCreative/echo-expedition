@@ -94,7 +94,7 @@ function DropdownSliderItem({ icon, label, value, onChange, min, max, step }) {
 }
 
 export default function Header({ isDark, toggleTheme }) {
-  const { user, speechSettings, installPromptEvent, installPromptDismissed, voiceCommandState } = useStore();
+  const { user, speechSettings, installPromptEvent, voiceCommandState } = useStore();
   const [showProfile, setShowProfile] = useState(false);
   const [showVoiceHelp, setShowVoiceHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -136,7 +136,6 @@ export default function Header({ isDark, toggleTheme }) {
   }, []);
 
   const handleShareClick = async () => {
-    setShowProfile(false); // Close dropdown
     const shareData = {
       title: 'Echo Expedition: Fluent Frontiers',
       text: 'Check out this AI-powered app for learning English!',
@@ -170,11 +169,9 @@ export default function Header({ isDark, toggleTheme }) {
             <span className="icon">{isDark ? 'light_mode' : 'dark_mode'}</span>
           </button>
           
-          {installPromptEvent && !installPromptDismissed && (
-            <button className="icon-button" onClick={promptToInstall} aria-label="Install app" title="Install App">
-              <span className="icon">install_desktop</span>
-            </button>
-          )}
+          <button className="icon-button" onClick={handleShareClick} aria-label="Share app" title="Share App">
+            <span className="icon">share</span>
+          </button>
 
           {user && (
             <div className="user-profile" ref={profileRef}>
@@ -240,11 +237,13 @@ export default function Header({ isDark, toggleTheme }) {
                         <span className="icon">info</span> About App
                     </button>
                   </li>
-                  <li>
-                    <button onClick={handleShareClick}>
-                      <span className="icon">share</span> Share App
-                    </button>
-                  </li>
+                  {installPromptEvent && (
+                    <li>
+                      <button onClick={() => { promptToInstall(); setShowProfile(false); }}>
+                        <span className="icon">install_desktop</span> Install App
+                      </button>
+                    </li>
+                  )}
                   
                   {isAdmin && <div className="divider"></div>}
                   {isAdmin && (

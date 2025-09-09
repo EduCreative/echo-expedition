@@ -11,6 +11,7 @@ An application for English language learners of all levels to improve their list
 -   **Offline Support:** Standard lessons are available offline, with progress synced when you reconnect.
 -   **Custom Lesson Generation:** Create your own lessons on any topic you want to practice.
 -   **Voice Commands:** Navigate and control the app with your voice.
+-   **Brand Assets:** A standalone `logo.svg` file is available at the project root for branding and promotional use.
 
 ## Prerequisites
 
@@ -23,8 +24,8 @@ An application for English language learners of all levels to improve their list
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/EduCreative/echo-expedition
-    cd echo-expedition
+    git clone <repository-url>
+    cd <repository-directory>
     ```
 
 2.  **Install dependencies:**

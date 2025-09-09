@@ -1,9 +1,4 @@
 
-
-
-
-
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -20,10 +15,12 @@ const translations = {
   'Recording... (Click to Stop)': 'ریکارڈنگ جاری ہے... (روکنے کے لیے کلک کریں)',
   'AI Feedback': 'AI کی رائے',
   'Urdu Translation': 'اردو ترجمہ',
-  'Word Scramble': 'الفاظ کی ترتیب',
+  'Fill in the Blank': 'خالی جگہ پُر کریں',
+  'Sentence Ordering': 'جملے کی ترتیب',
   'Level Challenge': 'سطح کا چیلنج',
   'Role Play': 'کردار نگاری',
   'Situational Prompt': 'صورتحال کا اشارہ',
+  'Listening Comprehension': 'سننے کی سمجھ',
 };
 
 function UserAudioPlayer({ audioBase64, audioMimeType }) {
@@ -171,12 +168,19 @@ function ExerciseHUD({ score, pronunciationScore, streak, xpGained }) {
 }
 
 function ResponseSection({ onRecord, isRecording, isProcessing, userTranscript, userRecordingBase64, userRecordingMimeType }) {
+  const shouldBlinkRecord = !isRecording && !isProcessing && !userTranscript;
   return (
     <section className="response-area">
-      <h2><span className="icon">mic</span>Your Turn</h2>
-      <p className="urdu-instruction">{translations['Your Turn']}</p>
+      <div className="section-header">
+        <h2><span className="icon">mic</span>Your Turn</h2>
+        <span className="urdu-heading">{translations['Your Turn']}</span>
+      </div>
       <button
-        className={c('button record-button', { primary: !isRecording, recording: isRecording })}
+        className={c('button record-button', {
+          primary: !isRecording,
+          recording: isRecording,
+          'blink-guide': shouldBlinkRecord
+        })}
         onClick={onRecord}
         disabled={isProcessing && !isRecording}
       >
@@ -207,9 +211,9 @@ function FeedbackSection({ isProcessing, feedback, score, pronunciationScore, st
   return (
     <section className="exercise-feedback">
       <div className="feedback-header">
-        <div>
+        <div className="section-header" style={{ flexGrow: 1, marginBottom: 0, marginRight: '16px' }}>
             <h2><span className="icon">school</span>AI Feedback</h2>
-            <p className="urdu-instruction">{translations['AI Feedback']}</p>
+            <span className="urdu-heading">{translations['AI Feedback']}</span>
         </div>
         {!isProcessing && feedback && !isAwaitingSync && (
           <button className="icon-button" onClick={() => onListen(feedback)} aria-label="Listen to feedback">
@@ -226,7 +230,7 @@ function FeedbackSection({ isProcessing, feedback, score, pronunciationScore, st
           <ExerciseHUD score={score} pronunciationScore={pronunciationScore} streak={streak} xpGained={xpGained} />
           {correctAnswer && (
             <div className="correct-answer-display">
-              <h4>Correct Sentence:</h4>
+              <h4>Correct Answer:</h4>
               <p>{correctAnswer}</p>
             </div>
           )}
@@ -241,14 +245,14 @@ function FeedbackSection({ isProcessing, feedback, score, pronunciationScore, st
   );
 }
 
-const HighlightScrambled = ({ text }) => {
+const HighlightBlank = ({ text }) => {
   if (!text) return null;
-  const parts = text.split(/(\*.*?\*)/g); // Split by *word*
+  const parts = text.split(/(___)/g);
   return (
     <>
       {parts.map((part, i) =>
-        part.startsWith('*') && part.endsWith('*') ? (
-          <strong key={i}>{part.slice(1, -1)}</strong>
+        part === '___' ? (
+          <strong key={i} className="fill-in-the-blank-word">{'_____'}</strong>
         ) : (
           part
         )
@@ -257,11 +261,12 @@ const HighlightScrambled = ({ text }) => {
   );
 };
 
+
 export default function ExerciseCard() {
   const { currentLesson, isRecording, isProcessing, speechSettings, currentStreak } = useStore();
   
-  const { lessonType } = currentLesson || {};
-  const currentPrompt = lessonType === 'sentence' || lessonType === 'situational_prompt' || lessonType === 'word_scramble'
+  const { lessonType, isPractice } = currentLesson || {};
+  const currentPrompt = (currentLesson?.prompts)
     ? currentLesson.prompts[currentLesson.currentPromptIndex]
     : null;
 
@@ -273,44 +278,17 @@ export default function ExerciseCard() {
     speakText(text, 'en-US');
   };
   
-  // Vocal prompts for beginners (A1/A2)
+  // Auto-play prompts if setting is enabled
   useEffect(() => {
-    const isBeginner = currentLesson && ['a1', 'a2'].includes(currentLesson.levelId);
-    if (isBeginner && currentPrompt?.text) {
-        let instructionText = '';
-        switch(lessonType) {
-            case 'sentence':
-                instructionText = "Listen and repeat.";
-                break;
-            case 'word_scramble':
-                instructionText = "Unscramble the words and say the correct sentence.";
-                break;
-            case 'situational_prompt':
-                instructionText = "Please respond to the following situation.";
-                break;
-        }
-        
-        // Speak instruction, pause, then speak the prompt.
-        // A short delay helps distinguish between the two.
-        speakText(instructionText, 'en-US');
-        setTimeout(() => speakText(currentPrompt.text, 'en-US'), instructionText.length * 80); // Rough delay based on text length
-    }
-  }, [currentPrompt?.text, currentLesson?.levelId]);
-
-  // Auto-play prompts for intermediate+ levels if setting is enabled
-  useEffect(() => {
-    const isAdvanced = currentLesson && ['b1', 'b2', 'c1', 'c2'].includes(currentLesson.levelId);
     const shouldAutoPlay = speechSettings.autoPlayPrompts;
-    
-    if (isAdvanced && shouldAutoPlay && currentPrompt?.text) {
-        // Use a small delay to make it feel less abrupt when changing prompts
-        const timer = setTimeout(() => {
-            speakText(currentPrompt.text, 'en-US');
-        }, 300);
-        
+    if (shouldAutoPlay && currentPrompt) {
+      const textToSpeak = currentPrompt.text || currentPrompt.correctText || currentPrompt.question;
+      if (textToSpeak) {
+        const timer = setTimeout(() => speakText(textToSpeak, 'en-US'), 300);
         return () => clearTimeout(timer);
+      }
     }
-  }, [currentPrompt?.text, currentLesson?.levelId, speechSettings.autoPlayPrompts]);
+  }, [currentPrompt, speechSettings.autoPlayPrompts]);
 
 
   if (!currentLesson || (isProcessing && !currentLesson.prompts && !currentLesson.chatHistory)) {
@@ -321,79 +299,128 @@ export default function ExerciseCard() {
     );
   }
 
-  // --- SENTENCE & SITUATIONAL PROMPT MODE ---
-  if (lessonType === 'sentence' || lessonType === 'situational_prompt') {
+  // --- STANDARD PROMPT-BASED LESSONS ---
+  if (['sentence', 'situational_prompt', 'fill_in_the_blank', 'sentence_ordering'].includes(lessonType)) {
     const { prompts, currentPromptIndex } = currentLesson;
-    const { text, userTranscript, feedback, translation, score, pronunciationScore, xpGained, userRecordingBase64, userRecordingMimeType } = currentPrompt;
+    const { text, correctText, jumbledText, translation, userTranscript, feedback, score, pronunciationScore, xpGained, userRecordingBase64, userRecordingMimeType } = currentPrompt;
     
+    const isLastPrompt = currentPromptIndex === prompts.length - 1;
+    const feedbackReceived = !isProcessing && feedback;
+    const shouldBlinkNext = feedbackReceived && !isLastPrompt;
+
+    let promptContent, listenText, title;
+    switch(lessonType) {
+        case 'fill_in_the_blank':
+            title = 'Fill in the Blank';
+            promptContent = <HighlightBlank text={text} />;
+            listenText = correctText;
+            break;
+        case 'sentence_ordering':
+            title = 'Sentence Ordering';
+            promptContent = <span className="jumbled-text">{jumbledText}</span>;
+            listenText = correctText;
+            break;
+        default: // sentence, situational_prompt
+            title = lessonType === 'sentence' ? 'Listen & Repeat' : 'Situational Prompt';
+            promptContent = text;
+            listenText = text;
+    }
+
     return (
       <div className="exercise-card">
-        <section>
-          <h2><span className="icon">hearing</span>Listen & Repeat</h2>
-          <p className="urdu-instruction">{translations['Listen & Repeat']}</p>
-          <p className="prompt-text">
-            <span>{text}</span>
-            <button className="icon-button listen-prompt-button" onClick={() => handleListen(text)} aria-label="Listen to sentence" disabled={isRecording}>
-              <span className="icon">volume_up</span>
-            </button>
-          </p>
-          <div className="prompt-controls">
-            <div className="prompt-navigation">
-              <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>
-              <span className="counter">{currentPromptIndex + 1} / {prompts.length}</span>
-              <button className="button" onClick={() => changePrompt(currentPromptIndex + 1)} disabled={currentPromptIndex === prompts.length - 1 || isRecording}>Next <span className="icon">arrow_forward</span></button>
-            </div>
+        {isPractice && (
+          <div className="practice-mode-banner">
+            <span className="icon">fitness_center</span>
+            Practice Mode: Scores will not be saved.
           </div>
-        </section>
-        {translation && !userTranscript && (
-          <section className="translation-section">
-            <h2><span className="icon">translate</span>Urdu Translation</h2>
-             <p className="urdu-instruction">{translations['Urdu Translation']}</p>
-            <p className="urdu-text">{translation || '...'}</p>
-          </section>
         )}
-        <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userTranscript} userRecordingBase64={userRecordingBase64} userRecordingMimeType={userRecordingMimeType} />
-        <FeedbackSection isProcessing={isProcessing} feedback={feedback} score={score} pronunciationScore={pronunciationScore} streak={currentStreak} xpGained={xpGained} onListen={handleListen} />
-      </div>
-    );
-  }
-  
-  // --- WORD SCRAMBLE MODE ---
-  if (lessonType === 'word_scramble') {
-    const { prompts, currentPromptIndex } = currentLesson;
-    const { scrambledText, correctText, userTranscript, feedback, translation, score, pronunciationScore, xpGained, userRecordingBase64, userRecordingMimeType } = currentPrompt;
-    
-    return (
-      <div className="exercise-card">
-        <section>
-          <h2><span className="icon">shuffle</span>Word Scramble</h2>
-           <p className="urdu-instruction">{translations['Word Scramble']}</p>
-          <p className="prompt-text">
-            <span><HighlightScrambled text={scrambledText} /></span>
-            <button className="icon-button listen-prompt-button" onClick={() => handleListen(correctText)} aria-label="Listen to correct sentence" disabled={isRecording}>
-              <span className="icon">volume_up</span>
-            </button>
-          </p>
-          <div className="prompt-controls">
-            <div className="prompt-navigation">
-              <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>
-              <span className="counter">{currentPromptIndex + 1} / {prompts.length}</span>
-              <button className="button" onClick={() => changePrompt(currentPromptIndex + 1)} disabled={currentPromptIndex === prompts.length - 1 || isRecording}>Next <span className="icon">arrow_forward</span></button>
+        <div className="exercise-main-area">
+          <section>
+            <div className="section-header">
+              <h2><span className="icon">hearing</span>{title}</h2>
+              <span className="urdu-heading">{translations[title]}</span>
             </div>
-          </div>
-        </section>
-        {translation && !userTranscript && (
-          <section className="translation-section">
-            <h2><span className="icon">translate</span>Urdu Translation</h2>
-             <p className="urdu-instruction">{translations['Urdu Translation']}</p>
-            <p className="urdu-text">{translation || '...'}</p>
+            <p className="prompt-text">
+              <span>{promptContent}</span>
+              <button className="icon-button listen-prompt-button" onClick={() => handleListen(listenText)} aria-label="Listen to sentence" disabled={isRecording}>
+                <span className="icon">volume_up</span>
+              </button>
+            </p>
+            <div className="prompt-controls">
+              <div className="prompt-navigation">
+                <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>
+                <span className="counter">{currentPromptIndex + 1} / {prompts.length}</span>
+                <button className={c("button", { 'blink-guide': shouldBlinkNext })} onClick={() => changePrompt(currentPromptIndex + 1)} disabled={currentPromptIndex === prompts.length - 1 || isRecording}>Next <span className="icon">arrow_forward</span></button>
+              </div>
+            </div>
+            {translation && !userTranscript && (
+              <div className="translation-section-embedded">
+                <div className="section-header" style={{ marginBottom: '8px' }}>
+                  <h3><span className="icon">translate</span>Urdu Translation</h3>
+                  <span className="urdu-heading">{translations['Urdu Translation']}</span>
+                </div>
+                <p className="urdu-text">{translation || '...'}</p>
+              </div>
+            )}
           </section>
-        )}
-        <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userTranscript} userRecordingBase64={userRecordingBase64} userRecordingMimeType={userRecordingMimeType} />
+          <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userTranscript} userRecordingBase64={userRecordingBase64} userRecordingMimeType={userRecordingMimeType} />
+        </div>
         <FeedbackSection isProcessing={isProcessing} feedback={feedback} score={score} pronunciationScore={pronunciationScore} streak={currentStreak} xpGained={xpGained} onListen={handleListen} correctAnswer={feedback && feedback !== 'Awaiting Sync' ? correctText : null}/>
       </div>
     );
   }
+  
+  // --- COMPREHENSION MODE ---
+  if (lessonType === 'comprehension') {
+    const { story, prompts, currentPromptIndex } = currentLesson;
+    const { question, correctAnswer, userTranscript, feedback, score, pronunciationScore, xpGained, userRecordingBase64, userRecordingMimeType } = prompts[currentPromptIndex];
+    
+    const isLastPrompt = currentPromptIndex === prompts.length - 1;
+    const feedbackReceived = !isProcessing && feedback;
+    const shouldBlinkNext = feedbackReceived && !isLastPrompt;
+
+    return (
+      <div className="exercise-card comprehension-card">
+        {isPractice && (
+          <div className="practice-mode-banner">
+            <span className="icon">fitness_center</span>
+            Practice Mode: Scores will not be saved.
+          </div>
+        )}
+        <section className="comprehension-story">
+          <div className="section-header">
+            <h2><span className="icon">menu_book</span>Listening Comprehension</h2>
+            <span className="urdu-heading">{translations['Listening Comprehension']}</span>
+          </div>
+          <p className="story-text">{story}</p>
+          <button className="button" onClick={() => handleListen(story)} disabled={isRecording || isProcessing}>
+            <span className="icon">volume_up</span> Listen to Story
+          </button>
+        </section>
+
+        <div className="exercise-main-area">
+            <section>
+                <div className="section-header">
+                    <h2><span className="icon">quiz</span>Question {currentPromptIndex + 1}</h2>
+                </div>
+                <p className="prompt-text">
+                    <span>{question}</span>
+                </p>
+                <div className="prompt-controls">
+                <div className="prompt-navigation">
+                    <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>
+                    <span className="counter">{currentPromptIndex + 1} / {prompts.length}</span>
+                    <button className={c("button", { 'blink-guide': shouldBlinkNext })} onClick={() => changePrompt(currentPromptIndex + 1)} disabled={currentPromptIndex === prompts.length - 1 || isRecording}>Next <span className="icon">arrow_forward</span></button>
+                </div>
+                </div>
+            </section>
+            <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userTranscript} userRecordingBase64={userRecordingBase64} userRecordingMimeType={userRecordingMimeType} />
+        </div>
+        <FeedbackSection isProcessing={isProcessing} feedback={feedback} score={score} pronunciationScore={pronunciationScore} streak={currentStreak} xpGained={xpGained} onListen={handleListen} correctAnswer={feedback && feedback !== 'Awaiting Sync' ? correctAnswer : null} />
+      </div>
+    );
+  }
+
 
   // --- ROLEPLAY & BOSS BATTLE MODE ---
   if (lessonType === 'roleplay' || lessonType === 'boss_battle') {
@@ -404,12 +431,20 @@ export default function ExerciseCard() {
 
     return (
       <div className="exercise-card roleplay-card">
+         {isPractice && (
+          <div className="practice-mode-banner">
+            <span className="icon">fitness_center</span>
+            Practice Mode: Scores will not be saved.
+          </div>
+        )}
         <section>
-          <h2>
-            <span className="icon">{isBossBattle ? 'workspace_premium' : 'groups'}</span>
-            {isBossBattle ? 'Level Challenge' : 'Role Play'}: {currentLesson.title}
-          </h2>
-          <p className="urdu-instruction">{translations[isBossBattle ? 'Level Challenge' : 'Role Play']}</p>
+          <div className="section-header">
+            <h2>
+              <span className="icon">{isBossBattle ? 'workspace_premium' : 'groups'}</span>
+              {isBossBattle ? 'Level Challenge' : 'Role Play'}: {currentLesson.title}
+            </h2>
+            <span className="urdu-heading">{translations[isBossBattle ? 'Level Challenge' : 'Role Play']}</span>
+          </div>
           <p className="scenario-description">{scenario}</p>
           <div className="chat-container">
             {chatHistory.map((msg, index) => (

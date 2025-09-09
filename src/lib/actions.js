@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -348,19 +349,12 @@ export const toggleVoiceCommands = () => {
 
 
 // --- Lesson Management ---
-export const startLesson = async (levelId, lessonId) => {
+const createLessonData = (levelId, lessonId, isPractice = false) => {
   const lessonMeta = levels[levelId].lessons[lessonId];
   const lessonContent = courseData[levelId]?.[lessonId];
-  
-  const isInteractive = ['roleplay', 'boss_battle'].includes(lessonMeta.type);
-  if (isInteractive && !get().isOnline) {
-    alert("This lesson requires an internet connection for a real-time conversation with the AI.");
-    return;
-  }
-  
+
   if (!lessonContent) {
-    set({ error: "Lesson content not found." });
-    return;
+    return null;
   }
   
   const lessonData = {
@@ -368,6 +362,7 @@ export const startLesson = async (levelId, lessonId) => {
     lessonId,
     lessonType: lessonMeta.type,
     title: lessonMeta.title,
+    isPractice, // Flag for practice mode
     ...lessonContent,
   };
 
@@ -377,6 +372,50 @@ export const startLesson = async (levelId, lessonId) => {
     lessonData.currentPromptIndex = 0;
   } else {
     lessonData.prompt = { userTranscript: null, feedback: null, score: null, ...lessonData.prompt };
+  }
+  
+  return lessonData;
+}
+
+export const startLesson = async (levelId, lessonId) => {
+  const lessonMeta = levels[levelId].lessons[lessonId];
+  
+  const isInteractive = ['roleplay', 'boss_battle'].includes(lessonMeta.type);
+  if (isInteractive && !get().isOnline) {
+    alert("This lesson requires an internet connection for a real-time conversation with the AI.");
+    return;
+  }
+  
+  const lessonData = createLessonData(levelId, lessonId);
+  if (!lessonData) {
+    set({ error: "Lesson content not found." });
+    return;
+  }
+
+  set({
+    view: 'exercise',
+    isProcessing: false,
+    error: null,
+    currentStreak: 0,
+    currentLesson: lessonData,
+  });
+};
+
+export const startPracticeMode = () => set({ view: 'practice_selection' });
+
+export const startPracticeLesson = async (levelId, lessonId) => {
+  const lessonMeta = levels[levelId].lessons[lessonId];
+  
+  const isInteractive = ['roleplay', 'boss_battle'].includes(lessonMeta.type);
+  if (isInteractive && !get().isOnline) {
+    alert("This lesson requires an internet connection for a real-time conversation with the AI.");
+    return;
+  }
+
+  const lessonData = createLessonData(levelId, lessonId, true); // Set isPractice to true
+  if (!lessonData) {
+    set({ error: "Lesson content not found." });
+    return;
   }
 
   set({
@@ -612,17 +651,21 @@ export const submitListeningDrillGuess = (guess) => {
 };
 
 // --- Free-Form Conversation Actions ---
-export const startConversation = () => {
+export const startConversation = (scenario) => {
     if (!get().isOnline) {
         alert("The conversation mode requires an internet connection.");
         return;
     }
+    const startMessage = scenario ? scenario.startPrompt : 'Hello! What would you like to talk about today?';
+    const scenarioTitle = scenario ? scenario.title : 'Open Conversation';
+
     set({
         view: 'conversation',
         error: null,
         conversationState: {
             isActive: true,
-            chatHistory: [{ role: 'ai', text: 'Hello! What would you like to talk about today?' }],
+            scenarioTitle: scenarioTitle,
+            chatHistory: [{ role: 'ai', text: startMessage }],
         }
     });
 }
@@ -631,6 +674,7 @@ const endConversation = () => {
     set(state => {
         state.conversationState.isActive = false;
         state.conversationState.chatHistory = [];
+        state.conversationState.scenarioTitle = null;
     });
 }
 
@@ -786,26 +830,36 @@ const checkForAchievements = () => {
 };
 
 const handleScoringAndProgress = (contentScore, isCustom, levelId, lessonId) => {
-  const { activeUserEmail } = get();
+  const { activeUserEmail, currentLesson } = get();
   if (!activeUserEmail) return 0;
   
   let xpGained = 0;
+  let sessionStreak = get().currentStreak;
+  if (contentScore >= STREAK_THRESHOLD) {
+    sessionStreak += 1;
+  } else {
+    sessionStreak = 0;
+  }
+  set(state => { state.currentStreak = sessionStreak; });
 
+  const comboBonus = contentScore * sessionStreak * COMBO_BONUS_MULTIPLIER;
+  const potentialXpGained = Math.round(contentScore + comboBonus);
+
+  // If this is a practice lesson, we only return the potential XP for the HUD and stop.
+  // No progress, streaks, or achievements will be saved.
+  if (currentLesson?.isPractice) {
+    return potentialXpGained;
+  }
+  
+  // --- PERSISTENCE LOGIC (only for real lessons) ---
   set(state => {
-    // 1. Update streak in session state
-    if (contentScore >= STREAK_THRESHOLD) state.currentStreak += 1;
-    else state.currentStreak = 0;
-
-    const comboBonus = contentScore * state.currentStreak * COMBO_BONUS_MULTIPLIER;
-    
-    // 2. Update persisted user progress
     const userProgress = state.allUserProgress[activeUserEmail];
     if (userProgress) {
       const currentBestScore = userProgress.progress[levelId]?.[lessonId];
+      // Only award XP and progress if it's a new best score or a custom lesson.
       if (isCustom || currentBestScore === undefined || contentScore > currentBestScore) {
-        const calculatedXp = Math.round(contentScore + comboBonus);
-        xpGained = calculatedXp;
-        userProgress.user.xp += calculatedXp;
+        xpGained = potentialXpGained; // Assign final XP gain here
+        userProgress.user.xp += xpGained;
 
         if (!isCustom) {
           if (!userProgress.progress[levelId]) userProgress.progress[levelId] = {};
@@ -818,18 +872,20 @@ const handleScoringAndProgress = (contentScore, isCustom, levelId, lessonId) => 
           userProgress.user.xp -= xpForNextLevel;
         }
         
-        // 3. Sync updates to session state for immediate UI reflection
+        // Sync updates to session state for immediate UI reflection
         state.user = { ...state.user, ...userProgress.user };
         state.progress = { ...userProgress.progress };
       }
     }
   });
 
-  // Update streak and check for achievements after scoring
-  if (contentScore >= STREAK_THRESHOLD) {
-    updateStreak();
+  // Update daily streak and check for achievements only if progress was actually made.
+  if (xpGained > 0) {
+    if (contentScore >= STREAK_THRESHOLD) {
+      updateStreak();
+    }
+    checkForAchievements();
   }
-  checkForAchievements();
 
   return xpGained;
 };
@@ -870,16 +926,29 @@ const processOnline = async (transcript, audioData, lessonState) => {
   try {
     let context, result, xpGained, promptToUpdate;
     const currentLesson = get().currentLesson;
+    const promptIndex = currentLesson.currentPromptIndex;
 
     switch (lessonType) {
       case 'sentence':
-      case 'word_scramble':
       case 'situational_prompt':
-        const promptIndex = currentLesson.currentPromptIndex;
         promptToUpdate = currentLesson.prompts[promptIndex];
-        context = (lessonType === 'word_scramble')
-          ? { scrambledText: promptToUpdate.scrambledText, correctText: promptToUpdate.correctText }
-          : { levelId, promptText: promptToUpdate.text };
+        context = { levelId, promptText: promptToUpdate.text };
+        break;
+      case 'sentence_ordering':
+        promptToUpdate = currentLesson.prompts[promptIndex];
+        context = { jumbledText: promptToUpdate.jumbledText, correctText: promptToUpdate.correctText };
+        break;
+      case 'fill_in_the_blank':
+        promptToUpdate = currentLesson.prompts[promptIndex];
+        context = { promptText: promptToUpdate.text, correctText: promptToUpdate.correctText };
+        break;
+      case 'comprehension':
+        promptToUpdate = currentLesson.prompts[promptIndex];
+        context = {
+          story: currentLesson.story,
+          question: promptToUpdate.question,
+          correctAnswer: promptToUpdate.correctAnswer,
+        };
         break;
       case 'roleplay':
       case 'boss_battle':
@@ -972,9 +1041,19 @@ export const syncProgress = async () => {
             let context, promptData;
             if (lessonContent.prompts) {
               promptData = lessonContent.prompts[promptIndex];
-              context = (lessonType === 'word_scramble')
-                ? { scrambledText: promptData.scrambledText, correctText: promptData.correctText }
-                : { levelId, promptText: promptData.text };
+               switch (lessonType) {
+                case 'sentence_ordering':
+                  context = { jumbledText: promptData.jumbledText, correctText: promptData.correctText };
+                  break;
+                case 'fill_in_the_blank':
+                  context = { promptText: promptData.text, correctText: promptData.correctText };
+                  break;
+                case 'comprehension':
+                   context = { story: lessonContent.story, question: promptData.question, correctAnswer: promptData.correctAnswer };
+                   break;
+                default:
+                  context = { levelId, promptText: promptData.text };
+              }
             } else {
               // This logic is for non-prompt-array lessons, which are online-only,
               // so they shouldn't be in the sync queue. This is a safeguard.

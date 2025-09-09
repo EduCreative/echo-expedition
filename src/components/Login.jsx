@@ -5,6 +5,7 @@
 import { useEffect, useRef } from 'react';
 import useStore from '../lib/store';
 import { handleGoogleLogin, continueAsGuest } from '../lib/actions';
+import Logo from './Logo';
 
 /* global google */
 
@@ -57,7 +58,7 @@ export default function Login() {
   return (
     <div className="login-container">
       <div className="login-card">
-        <h1>Echo Expedition 🚀</h1>
+        <h1><Logo /> Echo Expedition</h1>
         <p>Your AI-powered journey to fluent English starts here.</p>
         <div className="login-buttons">
           {isGoogleClientConfigured ? (

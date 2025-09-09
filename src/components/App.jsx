@@ -18,6 +18,7 @@ import {
   changePrompt,
   speakText,
   syncProgress,
+  startPracticeLesson,
 } from '../lib/actions';
 import PronunciationRace from './PronunciationRace';
 import ListeningDrill from './ListeningDrill';
@@ -25,15 +26,72 @@ import Conversation from './Conversation';
 import Footer from './Footer';
 import AdminPanel from './AdminPanel';
 import Leaderboard from './Leaderboard';
+import c from 'clsx';
+import { levels } from '../lib/prompts';
 
 // Keep a module-level reference to the recognition instance to persist it across re-renders
 let commandRecognition;
 
+function PracticeSelection() {
+  const [levelId, setLevelId] = useState('');
+  const [lessonIndex, setLessonIndex] = useState('');
+  
+  const availableLessons = levelId ? levels[levelId].lessons : [];
+
+  const handleStart = () => {
+    if (levelId && lessonIndex !== '') {
+      startPracticeLesson(levelId, parseInt(lessonIndex, 10));
+    }
+  };
+
+  return (
+    <div className="practice-selection-container">
+      <button className="button back-to-dashboard" onClick={goToDashboard}>
+        <span className="icon">arrow_back</span> Back to Dashboard
+      </button>
+      <div className="practice-selection-card">
+        <h2><span className="icon">fitness_center</span> Practice Mode</h2>
+        <p>Choose any lesson from the expedition map to practice. Your scores and progress won't be saved.</p>
+        <div className="practice-form">
+          <select value={levelId} onChange={e => { setLevelId(e.target.value); setLessonIndex(''); }}>
+            <option value="" disabled>-- Select a Level --</option>
+            {Object.entries(levels).map(([id, data]) => (
+              <option key={id} value={id}>{data.name}</option>
+            ))}
+          </select>
+          <select value={lessonIndex} onChange={e => setLessonIndex(e.target.value)} disabled={!levelId}>
+            <option value="" disabled>-- Select a Lesson --</option>
+            {availableLessons.map((lesson, index) => (
+              <option key={index} value={index}>{lesson.title}</option>
+            ))}
+          </select>
+          <button className="button primary" onClick={handleStart} disabled={!levelId || lessonIndex === ''}>
+            Start Practice Session
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function ExerciseView() {
-  const { error } = useStore();
+  const { error, currentLesson } = useStore();
+
+  const isLastPrompt = currentLesson?.prompts &&
+    currentLesson.currentPromptIndex === currentLesson.prompts.length - 1;
+
+  const lastPromptIsDone = isLastPrompt &&
+    currentLesson.prompts[currentLesson.currentPromptIndex].feedback;
+  
+  const isInteractiveLesson = ['roleplay', 'boss_battle'].includes(currentLesson?.lessonType);
+  const interactiveLessonIsDone = isInteractiveLesson && currentLesson?.prompt?.feedback;
+
+  const shouldBlinkBack = lastPromptIsDone || interactiveLessonIsDone;
+
   return (
     <div className="exercise-view">
-      <button className="button back-to-dashboard" onClick={goToDashboard}>
+      <button className={c("button back-to-dashboard", { 'blink-guide': shouldBlinkBack })} onClick={goToDashboard}>
         <span className="icon">arrow_back</span> Back to Dashboard
       </button>
       {error && <p className="error-message">{error}</p>}
@@ -255,6 +313,8 @@ export default function App() {
         return <Dashboard />;
       case 'exercise':
         return <ExerciseView />;
+      case 'practice_selection':
+        return <PracticeSelection />;
       case 'pronunciation_race':
         return <PronunciationRace />;
       case 'listening_drill':

@@ -49,7 +49,7 @@ export default function Conversation() {
     speechSettings,
     error,
   } = useStore();
-  const { isActive, chatHistory } = conversationState;
+  const { isActive, chatHistory, scenarioTitle } = conversationState;
   const chatAreaRef = useRef(null);
 
   useEffect(() => {
@@ -88,7 +88,10 @@ export default function Conversation() {
   return (
     <div className="conversation-container">
       <div className="conversation-header">
-        <h2><span className="icon" style={{fontSize: '24px', marginRight: '8px'}}>forum</span>Chat & Learn</h2>
+        <h2>
+          <span className="icon">forum</span>
+          {scenarioTitle || 'Chat & Learn'}
+        </h2>
         <button className="button" onClick={goToDashboard}>
             <span className="icon">arrow_back</span> Back to Dashboard
         </button>
