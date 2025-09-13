@@ -4,12 +4,19 @@
 */
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache } from 'firebase/firestore';
 
 // --- FIREBASE CONFIGURATION ---
 // IMPORTANT: Replace this with your own Firebase project's configuration.
 // You can find this in the Firebase Console:
 // Go to Project Settings > General tab > Your apps > Web app > Firebase SDK snippet > Config
+//
+// *** CRITICAL STEP FOR AUTHENTICATION ***
+// You MUST authorize the domain you are developing on (e.g., 'localhost')
+// in the Firebase Console.
+// Go to: Authentication > Settings > Authorized domains > Add domain
+// Failure to do this will result in "auth/unauthorized-domain" errors.
+
 const firebaseConfig = {
   apiKey: "AIzaSyBTTRyCxHOgrN6SSFMN9yzOeOf379gtspk",
   authDomain: "echo-expedition.firebaseapp.com",
@@ -23,21 +30,13 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
+// Initialize Firestore with offline persistence enabled. This allows the app
+// to work offline by caching data locally in IndexedDB. The SDK automatically
+// handles multi-tab synchronization and falls back to in-memory cache if needed.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({})
+});
+
 // Get Firebase services and export them
 export const auth = getAuth(app);
-export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
-
-// Enable offline persistence for Firestore.
-// This allows the app to work seamlessly offline by caching data locally.
-// It will automatically sync changes when the connection is restored.
-enableIndexedDbPersistence(db)
-  .catch((err) => {
-    if (err.code == 'failed-precondition') {
-      // This can happen if multiple tabs are open. Persistence can only be enabled in one.
-      console.warn('Firestore persistence failed: multiple tabs open.');
-    } else if (err.code == 'unimplemented') {
-      // The current browser does not support the required features.
-      console.warn('Firestore persistence not available in this browser.');
-    }
-  });

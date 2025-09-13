@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import {useState, useEffect, useRef} from 'react';
+import {useState, useEffect, useRef, useCallback} from 'react';
 import useStore from '../lib/store';
 import Login from './Login';
 import Dashboard from './Dashboard';
@@ -28,8 +28,10 @@ import Leaderboard from './Leaderboard';
 import c from 'clsx';
 import { levels } from '../lib/prompts';
 import { auth, db } from '../lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { onAuthStateChanged, signOut, getRedirectResult } from 'firebase/auth';
+import { doc, onSnapshot, setDoc, getDoc, writeBatch } from 'firebase/firestore';
+import GraffitiCongrats from './GraffitiCongrats';
+import Onboarding from './Onboarding';
 
 // Keep a module-level reference to the recognition instance to persist it across re-renders
 let commandRecognition;
@@ -111,85 +113,142 @@ function ToastContainer() {
   );
 }
 
-const { setUser, clearUserSession, updateProgressFromSnapshot, setUnsubscribe } = useStore.getState();
+const { setUser, clearUserSession, updateProgressFromSnapshot } = useStore.getState();
 
 export default function App() {
-  const { view, user, isRecording, voiceCommandState, isOnline } = useStore();
+  const { view, user, isRecording, voiceCommandState, isOnline, congratsAnimation, showOnboarding, isAuthenticating } = useStore();
   const [isDark, setIsDark] = useState(true);
-
+  const unsubscribeProgressRef = useRef(() => {});
   const toggleThemeRef = useRef();
   const isCommandRecognitionActive = useRef(false);
   const shouldRestartRecognition = useRef(true);
-
+  
+  // --- Firebase Auth State Listener ---
+  // This hook handles all authentication logic, including completing sign-in redirects.
+  // It is structured to prevent a race condition by only attaching the onAuthStateChanged
+  // listener *after* getRedirectResult has completed.
   useEffect(() => {
-    // --- Firebase Auth Listener ---
-    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        // User is signed in.
-        const userRef = doc(db, "users", firebaseUser.uid);
-        const userDoc = await getDoc(userRef);
+    let unsubscribeAuth = () => {};
 
-        let showOnboardingFlow = false;
-        
-        if (!userDoc.exists()) {
-          // New user, create documents for them
-          showOnboardingFlow = true;
-          const userData = {
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || 'Guest User',
-            email: firebaseUser.email,
-            picture: firebaseUser.photoURL,
-            registrationDate: new Date().toISOString(),
-            lastLogin: new Date().toISOString(),
-            status: 'active',
-            hasOnboarded: false,
-          };
-          const progressData = {
-            progress: {},
-            dailyStreak: { count: 0, lastUpdated: null },
-            achievements: [],
-            pronunciationRaceHighScore: 0,
-            listeningDrillHighScore: 0,
-            user: { xp: 0, level: 1 },
-          };
-          await setDoc(userRef, userData);
-          await setDoc(doc(db, "progress", firebaseUser.uid), progressData);
-        } else {
-          // Existing user, update last login
-          await setDoc(userRef, { lastLogin: new Date().toISOString() }, { merge: true });
-          showOnboardingFlow = !userDoc.data().hasOnboarded;
+    // First, handle the redirect result. This is crucial for the login flow.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result) {
+          // A user has just signed in. The listener below will handle the state update,
+          // but we can show an immediate welcome message.
+          addToast({
+            title: `Welcome, ${result.user.displayName}!`,
+            message: 'You have been successfully signed in.',
+            icon: 'login',
+          });
         }
-
-        // Set user in Zustand store
-        setUser({
-          uid: firebaseUser.uid,
-          displayName: firebaseUser.displayName,
-          photoURL: firebaseUser.photoURL,
-          email: firebaseUser.email,
-          isAnonymous: firebaseUser.isAnonymous,
+      })
+      .catch((error) => {
+        console.error("Redirect sign-in error:", error);
+        addToast({
+          title: 'Sign-in Failed',
+          message: 'There was an error during the sign-in process. Please try again.',
+          icon: 'error',
         });
-        
-        useStore.setState({ showOnboarding: showOnboardingFlow });
+      })
+      .finally(() => {
+        // NOW that any potential redirect has been processed, we can safely attach
+        // the listener. This prevents it from firing with a premature `null` user
+        // and causing a reload loop.
+        unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+          unsubscribeProgressRef.current();
 
-        // Set up real-time listener for user progress
-        const progressRef = doc(db, "progress", firebaseUser.uid);
-        const unsubscribeProgress = onSnapshot(progressRef, (doc) => {
-          if (doc.exists()) {
-            updateProgressFromSnapshot(doc.data());
+          try {
+            if (firebaseUser) {
+              setUser({
+                uid: firebaseUser.uid,
+                displayName: firebaseUser.displayName,
+                photoURL: firebaseUser.photoURL,
+                email: firebaseUser.email,
+                isAnonymous: firebaseUser.isAnonymous,
+              });
+
+              const userRef = doc(db, "users", firebaseUser.uid);
+              const progressRef = doc(db, "progress", firebaseUser.uid);
+              const userDoc = await getDoc(userRef);
+
+              if (!userDoc.exists()) {
+                const batch = writeBatch(db);
+                const userData = {
+                  id: firebaseUser.uid,
+                  name: firebaseUser.displayName || 'Guest User',
+                  email: firebaseUser.email,
+                  picture: firebaseUser.photoURL,
+                  registrationDate: new Date().toISOString(),
+                  lastLogin: new Date().toISOString(),
+                  status: 'active',
+                  hasOnboarded: false,
+                };
+                const progressData = {
+                  progress: {},
+                  dailyStreak: { count: 0, lastUpdated: null },
+                  achievements: [],
+                  pronunciationRaceHighScore: 0,
+                  listeningDrillHighScore: 0,
+                  user: { xp: 0, level: 1 },
+                };
+                batch.set(userRef, userData);
+                batch.set(progressRef, progressData);
+                await batch.commit();
+                updateProgressFromSnapshot(progressData);
+                useStore.setState({ showOnboarding: true });
+              } else {
+                const progressDoc = await getDoc(progressRef);
+                if (progressDoc.exists()) {
+                  updateProgressFromSnapshot(progressDoc.data());
+                }
+                await setDoc(userRef, { lastLogin: new Date().toISOString() }, { merge: true });
+                useStore.setState({ showOnboarding: !userDoc.data().hasOnboarded });
+              }
+
+              unsubscribeProgressRef.current = onSnapshot(progressRef, (snapshot) => {
+                if (snapshot.exists()) {
+                  updateProgressFromSnapshot(snapshot.data());
+                }
+              }, (error) => {
+                 console.error("Firestore snapshot error:", error);
+                 addToast({ title: 'Sync Error', message: 'Could not sync latest progress.', icon: 'sync_problem' });
+              });
+
+            } else {
+              const { user: localUser } = useStore.getState();
+              if (localUser && (localUser.isAnonymous || localUser.isDevAdmin)) {
+                // A local session is active, don't clear it.
+              } else {
+                clearUserSession();
+              }
+            }
+          } catch (error) {
+            console.error("Critical error during user session initialization:", error);
+            addToast({
+              title: 'Authentication Error',
+              message: 'Could not load your session. Please sign in again.',
+              icon: 'error',
+              duration: 7000,
+            });
+            if (auth.currentUser) await signOut(auth);
+            clearUserSession();
+          } finally {
+            useStore.setState({ isAuthenticating: false });
           }
         });
-        setUnsubscribe(unsubscribeProgress);
-
-      } else {
-        // User is signed out.
-        clearUserSession();
-      }
-    });
+      });
     
-    return () => unsubscribeAuth(); // Cleanup subscription on unmount
+    return () => {
+      unsubscribeAuth();
+      unsubscribeProgressRef.current();
+    };
   }, []);
 
-
+  const handleCongratsClose = useCallback(() => {
+    useStore.setState({ congratsAnimation: { show: false, text: '' } });
+  }, []);
+  
   useEffect(() => {
     toggleThemeRef.current = () => setIsDark(p => !p);
   }, []);
@@ -289,14 +348,26 @@ export default function App() {
     };
 
     commandRecognition.onerror = (event) => {
-      // These are not critical errors and are often part of the normal lifecycle.
-      // 'no-speech' happens on silence, 'aborted' can happen when we programmatically stop the service.
+      // Non-critical lifecycle events.
       if (event.error === 'no-speech' || event.error === 'aborted') {
         console.log(`Voice command recognition event: ${event.error}`);
         return;
       }
       
-      // All other events are treated as actual errors.
+      // Specific handling for network errors, which are common when going offline.
+      if (event.error === 'network') {
+        console.warn('Voice command recognition network error. Turning off feature.');
+        addToast({ 
+          title: 'Connection Lost', 
+          message: 'Voice commands have been paused due to a network issue.', 
+          icon: 'wifi_off' 
+        });
+        // Automatically turn off the feature in the global state.
+        useStore.setState(state => { state.voiceCommandState.isListening = false; });
+        return;
+      }
+      
+      // Handle all other errors.
       console.error('Voice command recognition error:', event.error, event.message);
       addToast({ 
         title: 'Voice Command Error', 
@@ -308,8 +379,8 @@ export default function App() {
     commandRecognition.onend = () => {
         isCommandRecognitionActive.current = false;
         const state = useStore.getState();
-        // Only restart if it was not intentionally stopped
-        if (shouldRestartRecognition.current && state.voiceCommandState.isListening && !state.isRecording) {
+        // Only restart if it was not intentionally stopped AND we are online
+        if (shouldRestartRecognition.current && state.voiceCommandState.isListening && !state.isRecording && state.isOnline) {
             try { 
                 commandRecognition.start(); 
             } catch(e) {
@@ -319,7 +390,7 @@ export default function App() {
     };
 
     // --- Controller Logic ---
-    const shouldBeListening = voiceCommandState.isListening && !isRecording;
+    const shouldBeListening = voiceCommandState.isListening && !isRecording && isOnline;
     
     if (shouldBeListening && !isCommandRecognitionActive.current) {
       shouldRestartRecognition.current = true; // Set the restart flag
@@ -340,8 +411,17 @@ export default function App() {
         commandRecognition.stop();
       }
     };
-  }, [voiceCommandState.isListening, isRecording]);
+  }, [voiceCommandState.isListening, isRecording, isOnline]);
 
+  if (isAuthenticating) {
+    return (
+      <div className="login-container">
+        <div className="loader">
+          <span className="icon">hourglass_top</span> Verifying sign-in...
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return <Login />;
@@ -372,11 +452,18 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {showOnboarding && <Onboarding />}
       <Header isDark={isDark} toggleTheme={() => setIsDark(p => !p)} />
       <main>
         {renderView()}
       </main>
       <ToastContainer />
+      {congratsAnimation.show && (
+        <GraffitiCongrats
+          text={congratsAnimation.text}
+          onClose={handleCongratsClose}
+        />
+      )}
       <Footer />
     </div>
   );

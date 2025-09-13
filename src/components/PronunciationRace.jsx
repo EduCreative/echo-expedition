@@ -4,10 +4,58 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useStore from '../lib/store';
 import { goToDashboard, startRecording, stopRecording, startPronunciationRace, goToNextRaceWord } from '../lib/actions';
 import c from 'clsx';
+
+// This component needs to be self-contained for PronunciationRace
+function UserAudioPlayer({ audioBase64, audioMimeType }) {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioSrc, setAudioSrc] = useState('');
+
+  useEffect(() => {
+    if (audioBase64 && audioMimeType) {
+      setAudioSrc(`data:${audioMimeType};base64,${audioBase64}`);
+    } else {
+      setAudioSrc('');
+    }
+  }, [audioBase64, audioMimeType]);
+  
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onEnded = () => setIsPlaying(false);
+    audio.addEventListener('ended', onEnded);
+    return () => audio.removeEventListener('ended', onEnded);
+  }, [audioSrc]);
+
+  const togglePlayPause = (e) => {
+    e.stopPropagation();
+    const audio = audioRef.current;
+    if (!audio || !audioSrc) return;
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      if (audio.ended) audio.currentTime = 0;
+      audio.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+  
+  if (!audioSrc) return null;
+  return (
+    <div className="user-audio-player" style={{padding: '4px 12px'}}>
+      <audio ref={audioRef} src={audioSrc} preload="metadata"></audio>
+      <button onClick={togglePlayPause} className="icon-button play-pause-button" aria-label={isPlaying ? "Pause audio" : "Play audio"}>
+        <span className="icon">{isPlaying ? 'pause' : 'play_arrow'}</span>
+      </button>
+      <p style={{flexGrow: 1, textAlign: 'left', marginLeft: '8px', fontSize: '14px', color: 'var(--text-secondary)'}}>Your Recording</p>
+    </div>
+  );
+}
+
 
 function RaceEndSummary({ score, highScore }) {
   return (
@@ -34,10 +82,33 @@ function RaceEndSummary({ score, highScore }) {
   );
 }
 
-function RaceFeedback({ result, onNext, onRetry }) {
+function RaceFeedback({ result, onNext, onRetry, currentWord, onListen }) {
   if (!result) return null;
 
   const { score, feedbackTip, status } = result;
+
+  if (status === 'OFFLINE_PRACTICE') {
+      return (
+          <div className="offline-comparison-section">
+              <h3 className="offline-header"><span className="icon">wifi_off</span>Offline Practice</h3>
+              <p className="offline-instruction">Compare your recording to the original.</p>
+              <h2 className="race-word" style={{marginBottom: '24px'}}>{currentWord}</h2>
+              <div className="audio-players-container">
+                  <div className="audio-player">
+                      <button className="button" onClick={() => onListen(currentWord)}>
+                          <span className="icon">play_arrow</span> Original Audio
+                      </button>
+                  </div>
+                  <div className="audio-player">
+                      <UserAudioPlayer audioBase64={result.userRecordingBase64} audioMimeType={result.userRecordingMimeType} />
+                  </div>
+              </div>
+              <div className="race-feedback-actions">
+                  <button className="button primary" onClick={onNext}>Next Word <span className="icon">arrow_forward</span></button>
+              </div>
+          </div>
+      );
+  }
 
   const getFeedbackMessage = () => {
     if (status === 'success') return 'Perfect!';
@@ -75,7 +146,9 @@ export default function PronunciationRace() {
     isRecording, 
     isProcessing,
     pronunciationRaceHighScore,
-    speechSettings
+    speechSettings,
+    isOnline,
+    isAiEnabled,
   } = useStore();
 
   const { isActive, words, currentWordIndex, streak, lives, lastResult } = pronunciationRaceState;
@@ -142,6 +215,7 @@ export default function PronunciationRace() {
 
         {!isProcessing && !lastResult && (
             <div className="race-word-area">
+                {(!isOnline || !isAiEnabled) && <p className="offline-warning" style={{marginBottom: '24px'}}><span className="icon">wifi_off</span>Offline mode: Scores and AI feedback are unavailable.</p>}
                 <p className="race-instruction">Pronounce the word:</p>
                 <div className="race-word-wrapper">
                     <h2 className="race-word">{currentWord}</h2>
@@ -161,7 +235,7 @@ export default function PronunciationRace() {
         )}
 
         {lastResult && (
-            <RaceFeedback result={lastResult} onNext={goToNextRaceWord} onRetry={handleRetry}/>
+            <RaceFeedback result={lastResult} onNext={goToNextRaceWord} onRetry={handleRetry} currentWord={currentWord} onListen={handleListen}/>
         )}
       </div>
 

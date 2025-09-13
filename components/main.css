@@ -1,9 +1,5 @@
 
 
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
-*/
 @charset "UTF-8";
 :root {
   --primary: #4285f4;
@@ -22,7 +18,6 @@
   --font-text: 'Google Sans Text', sans-serif;
   --font-icon: 'Material Symbols Outlined';
   --font-urdu: 'Noto Nastaliq Urdu', serif;
-  --font-graffiti: 'Permanent Marker', cursive;
   
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -195,7 +190,7 @@ header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  gap: 16px;
   padding: 16px 24px;
   background-color: var(--bg-primary-translucent);
   border-bottom: 1px solid var(--border-translucent);
@@ -210,6 +205,7 @@ header h1 {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-right: auto;
 }
 
 .header-controls {
@@ -218,36 +214,6 @@ header h1 {
   gap: 16px;
   align-items: center;
 }
-
-/* --- Logo Styles --- */
-.logo-svg {
-  width: 28px;
-  height: 28px;
-  vertical-align: middle;
-}
-/* Theme-aware colors for logo parts */
-.logo-primary { fill: var(--primary); }
-.logo-secondary { fill: var(--bg-primary); }
-.logo-accent { fill: var(--gold); }
-.logo-accent-stroke { stroke: var(--gold); }
-.logo-secondary-stroke { stroke: var(--bg-primary); }
-
-.login-card h1 {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-}
-.login-card .logo-svg {
-  width: 40px;
-  height: 40px;
-}
-.about-modal h2 .logo-svg {
-  width: 24px;
-  height: 24px;
-  margin-right: 4px;
-}
-
 
 /* Speech Controls */
 .speech-controls {
@@ -403,7 +369,7 @@ input:checked + .slider:before {
   background: #fff;
   color: #333;
 }
-.login-buttons .button.google svg {
+.login-buttons .button.google img {
   width: 20px;
   height: 20px;
 }
@@ -626,7 +592,7 @@ input:checked + .slider:before {
   border: 1px solid var(--border-primary);
   border-radius: 8px;
   padding: 8px;
-  width: 240px;
+  width: 200px;
   box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
   opacity: 0;
   transform: translateY(-10px);
@@ -659,47 +625,6 @@ input:checked + .slider:before {
 .profile-dropdown button.logout {
   color: var(--error);
 }
-.profile-dropdown .dropdown-header {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--text-secondary);
-    padding: 8px 12px;
-    text-transform: uppercase;
-}
-.dropdown-item-toggle, .dropdown-item-select, .dropdown-item-slider {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-}
-.dropdown-item-toggle:hover, .dropdown-item-select:hover {
-    background: var(--bg-tertiary);
-}
-.dropdown-item-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-}
-.dropdown-item-select select {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 12px;
-    max-width: 120px;
-}
-.dropdown-item-slider {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-}
-.dropdown-item-slider input[type="range"] {
-    width: 100%;
-    margin: 0;
-}
 
 /* Exercise Card */
 .exercise-view {
@@ -709,20 +634,6 @@ input:checked + .slider:before {
 .back-to-dashboard {
   margin-bottom: 16px;
 }
-.blink-guide {
-  animation: blink-animation 1.5s infinite;
-}
-@keyframes blink-animation {
-  0%, 100% { background-color: var(--primary-light); border-color: var(--primary); }
-  50% { background-color: transparent; border-color: var(--border-primary); }
-}
-.dark .blink-guide {
-  animation: blink-animation-dark 1.5s infinite;
-}
-@keyframes blink-animation-dark {
-  0%, 100% { background-color: #283550; border-color: var(--primary); }
-  50% { background-color: transparent; border-color: var(--border-primary); }
-}
 
 .exercise-card {
   background: var(--bg-secondary);
@@ -731,7 +642,7 @@ input:checked + .slider:before {
   padding: 32px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 32px;
 }
 .exercise-card section {
   padding: 24px;
@@ -761,29 +672,12 @@ input:checked + .slider:before {
   justify-content: center;
   text-align: center;
   gap: 16px;
-  flex-grow: 1;
 }
-.prompt-text .jumbled-text {
-  font-style: italic;
-  color: var(--text-secondary);
-  letter-spacing: 2px;
-}
-.fill-in-the-blank-word {
+.prompt-text strong {
   color: var(--warning);
   font-weight: 700;
   text-decoration: underline;
   text-decoration-style: dotted;
-  letter-spacing: 2px;
-}
-
-.phonetic-transcription {
-  font-size: 18px;
-  color: var(--text-secondary);
-  margin-top: 8px;
-  text-align: center;
-  letter-spacing: 1px;
-  min-height: 27px; /* to prevent layout shift */
-  font-style: italic;
 }
 
 .prompt-controls {
@@ -882,6 +776,15 @@ input:checked + .slider:before {
   line-height: 1.8;
   text-align: right;
   min-height: 36px;
+}
+.urdu-instruction {
+  font-family: var(--font-urdu);
+  direction: rtl;
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-top: -12px;
+  margin-bottom: 8px;
 }
 .record-button-translation {
   font-family: var(--font-urdu);
@@ -1033,26 +936,6 @@ input:checked + .slider:before {
 }
 .feedback-header h2 {
   margin-bottom: 0;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.section-header h2,
-.section-header h3 {
-  margin-bottom: 0;
-}
-
-.urdu-heading {
-  font-family: var(--font-urdu);
-  font-size: 14px;
-  color: var(--text-secondary);
-  direction: rtl;
-  padding-left: 16px;
-  flex-shrink: 0;
 }
 
 .feedback-text {
@@ -1393,8 +1276,7 @@ input:checked + .slider:before {
 .listening-drill-widget,
 .free-form-widget,
 .leaderboard-widget,
-.custom-lesson-creator,
-.practice-mode-widget {
+.custom-lesson-creator {
   padding: 24px;
   background-color: var(--bg-tertiary);
   border-radius: 12px;
@@ -1432,8 +1314,7 @@ input:checked + .slider:before {
 .pronunciation-race-widget .button,
 .listening-drill-widget .button,
 .free-form-widget .button,
-.leaderboard-widget .button,
-.practice-mode-widget .button {
+.leaderboard-widget .button {
   width: 100%;
   padding: 12px;
   font-size: 16px;

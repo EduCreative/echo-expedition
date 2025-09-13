@@ -1,29 +1,12 @@
-
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import {useRef, useState, useEffect} from 'react';
-import c from 'clsx';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import useStore from '../lib/store';
-import { startRecording, stopRecording, changePrompt, speakText } from '../lib/actions';
+import { startRecording, stopRecording, speakText, changePrompt } from '../lib/actions';
 import { getPhoneticTranscription } from '../lib/llm';
-
-const translations = {
-  'Listen & Repeat': 'سنیں اور دہرائیں',
-  'Your Turn': 'اب آپ کی باری',
-  'Start Recording': 'ریکارڈنگ شروع کریں',
-  'Recording... (Click to Stop)': 'ریکارڈنگ جاری ہے... (روکنے کے لیے کلک کریں)',
-  'AI Feedback': 'AI کی رائے',
-  'Urdu Translation': 'اردو ترجمہ',
-  'Fill in the Blank': 'خالی جگہ پُر کریں',
-  'Sentence Ordering': 'جملے کی ترتیب',
-  'Level Challenge': 'سطح کا چیلنج',
-  'Role Play': 'کردار نگاری',
-  'Situational Prompt': 'صورتحال کا اشارہ',
-  'Listening Comprehension': 'سننے کی سمجھ',
-};
+import c from 'clsx';
 
 function UserAudioPlayer({ audioBase64, audioMimeType }) {
   const audioRef = useRef(null);
@@ -51,8 +34,6 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
     audio.addEventListener('loadeddata', setAudioData);
     audio.addEventListener('timeupdate', setAudioTime);
     audio.addEventListener('ended', onEnded);
-
-    // Reset progress when src changes
     setProgress(0);
     setIsPlaying(false);
 
@@ -67,13 +48,10 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
     e.stopPropagation();
     const audio = audioRef.current;
     if (!audio || !audioSrc) return;
-
     if (isPlaying) {
       audio.pause();
     } else {
-      if (audio.ended) {
-          audio.currentTime = 0;
-      }
+      if (audio.ended) audio.currentTime = 0;
       audio.play();
     }
     setIsPlaying(!isPlaying);
@@ -103,429 +81,281 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
       </button>
       <div className="seek-bar-container">
         <input
-          type="range"
-          className="seek-bar"
-          value={progress}
-          max={duration || 0}
-          onChange={handleSeek}
-          step="0.01"
+          type="range" className="seek-bar" value={progress}
+          max={duration || 0} onChange={handleSeek} step="0.01"
           aria-label="Audio progress"
         />
       </div>
-      <span className="time-display">{formatTime(duration > 0 ? progress : 0)} / {formatTime(duration)}</span>
+      <span className="time-display">{formatTime(progress)} / {formatTime(duration)}</span>
     </div>
   );
 }
 
-function ScoreFeedbackMessage({ score }) {
-  const [visible, setVisible] = useState(false);
-  const [message, setMessage] = useState('');
+function FeedbackHUD({ score, pronunciationScore, xpGained, streak }) {
+  const [scoreFeedback, setScoreFeedback] = useState('');
 
   useEffect(() => {
-    if (score !== null) {
-      if (score >= 95) setMessage('Perfect!');
-      else if (score >= 85) setMessage('Excellent!');
-      else if (score >= 75) setMessage('Great Job!');
-      else setMessage('');
-      
-      if (score >= 75) {
-        setVisible(true);
-        const timer = setTimeout(() => setVisible(false), 2000);
-        return () => clearTimeout(timer);
-      }
+    if (xpGained > 0) {
+      setScoreFeedback(`+${xpGained} XP`);
+      const timer = setTimeout(() => setScoreFeedback(''), 2000);
+      return () => clearTimeout(timer);
     }
-  }, [score]);
+  }, [xpGained]);
 
-  if (!visible || !message) return null;
-
-  return <div className="score-feedback-message">{message}</div>;
-}
-
-function ExerciseHUD({ score, pronunciationScore, streak, xpGained }) {
-  if (score === null) return null;
   return (
     <div className="exercise-hud">
       <div className="hud-item hud-score">
         <span className="hud-label">Content Score</span>
-        <span className="hud-value">{score} <span className="hud-suffix">/ 100</span></span>
-        <ScoreFeedbackMessage score={score} />
+        <span className="hud-value">{score ?? '??'}<span className="hud-suffix">/100</span></span>
+        {scoreFeedback && <span className="score-feedback-message">{scoreFeedback}</span>}
       </div>
-      {pronunciationScore !== null && (
-        <div className="hud-item hud-pronunciation">
-            <span className="hud-label">Pronunciation</span>
-            <span className="hud-value">{pronunciationScore} <span className="hud-suffix">/ 100</span></span>
-        </div>
-      )}
-      {streak > 0 && (
-        <div className="hud-item hud-combo">
-          <span className="hud-label">Combo</span>
-          <span className="hud-value">🔥 x{streak}</span>
-        </div>
-      )}
-      {xpGained > 0 && (
-        <div className="hud-item hud-xp">
-          <span className="hud-label">XP Gained</span>
-          <span className="hud-value">+{xpGained}</span>
-        </div>
-      )}
+      <div className="hud-item hud-pronunciation">
+        <span className="hud-label">Pronunciation</span>
+        <span className="hud-value">{pronunciationScore ?? '??'}<span className="hud-suffix">/100</span></span>
+      </div>
+      <div className="hud-item hud-combo">
+        <span className="hud-label">Streak</span>
+        <span className="hud-value">{streak}x</span>
+      </div>
     </div>
   );
 }
 
-function ResponseSection({ onRecord, isRecording, isProcessing, userTranscript, userRecordingBase64, userRecordingMimeType }) {
-  const shouldBlinkRecord = !isRecording && !isProcessing && !userTranscript;
-  return (
-    <section className="response-area">
-      <div className="section-header">
-        <h2><span className="icon">mic</span>Your Turn</h2>
-        <span className="urdu-heading">{translations['Your Turn']}</span>
-      </div>
-      <button
-        className={c('button record-button', {
-          primary: !isRecording,
-          recording: isRecording,
-          'blink-guide': shouldBlinkRecord
-        })}
-        onClick={onRecord}
-        disabled={isProcessing && !isRecording}
-      >
-        <span className="icon">mic</span>
-        <div>
-           {isRecording ? 'Recording... (Click to Stop)' : 'Start Recording'}
-           <div className="record-button-translation">
-            {isRecording ? translations['Recording... (Click to Stop)'] : translations['Start Recording']}
-          </div>
-        </div>
-      </button>
-      {userTranscript && (
-        <div className="transcript">
-          <h3>Your attempt:</h3>
-          <p>"{userTranscript}"</p>
-          <UserAudioPlayer audioBase64={userRecordingBase64} audioMimeType={userRecordingMimeType} />
-        </div>
-      )}
-    </section>
-  );
-}
+function PromptDisplay({ lesson, prompt, ipa, isIpaLoading }) {
+  let promptContent;
+  switch (lesson.lessonType) {
+    case 'sentence_ordering':
+      promptContent = <span className="jumbled-text">{prompt.jumbledText}</span>;
+      break;
+    case 'fill_in_the_blank':
+      promptContent = (
+        <span>
+          {prompt.text.split('___').map((part, i) => (
+            <React.Fragment key={i}>
+              {part}
+              {i < prompt.text.split('___').length - 1 && <span className="fill-in-the-blank-word">______</span>}
+            </React.Fragment>
+          ))}
+        </span>
+      );
+      break;
+    case 'comprehension':
+      promptContent = <span>{prompt.question}</span>;
+      break;
+    default:
+      promptContent = <span>{prompt.text}</span>;
+  }
 
-function FeedbackSection({ isProcessing, feedback, score, pronunciationScore, streak, xpGained, onListen, correctAnswer }) {
-  if (!isProcessing && !feedback) return null;
-  
-  const isAwaitingSync = feedback === 'Awaiting Sync';
-
-  return (
-    <section className="exercise-feedback">
-      <div className="feedback-header">
-        <div className="section-header" style={{ flexGrow: 1, marginBottom: 0, marginRight: '16px' }}>
-            <h2><span className="icon">school</span>AI Feedback</h2>
-            <span className="urdu-heading">{translations['AI Feedback']}</span>
-        </div>
-        {!isProcessing && feedback && !isAwaitingSync && (
-          <button className="icon-button" onClick={() => onListen(feedback)} aria-label="Listen to feedback">
-            <span className="icon">volume_up</span>
-          </button>
-        )}
-      </div>
-      {isProcessing && !feedback ? (
-        <div className="loader">
-          <span className="icon">hourglass_top</span> Analyzing your speech...
-        </div>
-      ) : (
-        <>
-          <ExerciseHUD score={score} pronunciationScore={pronunciationScore} streak={streak} xpGained={xpGained} />
-          {correctAnswer && (
-            <div className="correct-answer-display">
-              <h4>Correct Answer:</h4>
-              <p>{correctAnswer}</p>
-            </div>
-          )}
-          {isAwaitingSync ? (
-             <p className="feedback-text">You're currently offline. Your score and feedback will be available after you sync your progress.</p>
-          ) : (
-            <p className="feedback-text">{feedback}</p>
-          )}
-        </>
-      )}
-    </section>
-  );
-}
-
-const HighlightBlank = ({ text }) => {
-  if (!text) return null;
-  const parts = text.split(/(___)/g);
   return (
     <>
-      {parts.map((part, i) =>
-        part === '___' ? (
-          <strong key={i} className="fill-in-the-blank-word">{'_____'}</strong>
-        ) : (
-          part
-        )
-      )}
+      <div className="prompt-text">
+        {promptContent}
+      </div>
+      <p className="phonetic-transcription">
+        {isIpaLoading ? '...' : ipa}
+      </p>
     </>
   );
-};
-
+}
 
 export default function ExerciseCard() {
-  const { currentLesson, isRecording, isProcessing, speechSettings, currentStreak } = useStore();
-  const set = useStore.setState;
+  const {
+    currentLesson, isRecording, isProcessing, speechSettings,
+    isAiEnabled, isOnline, currentStreak,
+  } = useStore();
   const [ipa, setIpa] = useState('');
-  const [isLoadingIpa, setIsLoadingIpa] = useState(false);
-  
-  const { lessonType, isPractice } = currentLesson || {};
-  const currentPrompt = (currentLesson?.prompts)
-    ? currentLesson.prompts[currentLesson.currentPromptIndex]
-    : null;
+  const [isIpaLoading, setIsIpaLoading] = useState(false);
+  const isMultiPrompt = currentLesson?.prompts && currentLesson.prompts.length > 1;
+
+  const currentPrompt = useMemo(() => {
+    if (!currentLesson) return null;
+    return isMultiPrompt ? currentLesson.prompts[currentLesson.currentPromptIndex] : currentLesson.prompt;
+  }, [currentLesson, isMultiPrompt]);
+
+  const textToTranscribe = useMemo(() => {
+    if (!currentPrompt) return '';
+    return currentPrompt.correctText || currentPrompt.text || '';
+  }, [currentPrompt]);
 
   useEffect(() => {
-    const isRelevantType = ['sentence', 'fill_in_the_blank', 'sentence_ordering'].includes(lessonType);
-    if (!speechSettings.showPhonetics || !currentPrompt || !isRelevantType) {
-      setIpa('');
-      return;
-    }
-
-    const textForIpa = currentPrompt.correctText || currentPrompt.text;
-    if (!textForIpa) return;
-
-    if (currentPrompt.ipa) {
-      setIpa(currentPrompt.ipa);
-      return;
-    }
-
+    let isCancelled = false;
     const fetchIpa = async () => {
-      setIsLoadingIpa(true);
-      setIpa('');
-      try {
-        const transcription = await getPhoneticTranscription(textForIpa);
-        setIpa(transcription);
-        
-        set(state => {
-          if (state.currentLesson && state.currentLesson.prompts) {
-            const promptToUpdate = state.currentLesson.prompts[state.currentLesson.currentPromptIndex];
-            if (promptToUpdate) {
-              promptToUpdate.ipa = transcription;
-            }
-          }
-        });
-
-      } catch (error) {
-        console.error("Failed to fetch IPA:", error);
-        setIpa('Could not load phonetics.');
-      } finally {
-        setIsLoadingIpa(false);
+      if (speechSettings.showPhonetics && textToTranscribe && isOnline && isAiEnabled) {
+        setIsIpaLoading(true);
+        try {
+          const transcription = await getPhoneticTranscription(textToTranscribe);
+          if (!isCancelled) setIpa(transcription);
+        } catch (error) {
+          console.error("Failed to fetch IPA:", error);
+          if (!isCancelled) setIpa('');
+        } finally {
+          if (!isCancelled) setIsIpaLoading(false);
+        }
+      } else {
+        setIpa('');
       }
     };
-
     fetchIpa();
-
-  }, [currentPrompt, speechSettings.showPhonetics, lessonType, set]);
-
-  const handleRecord = () => {
-    isRecording ? stopRecording() : startRecording();
-  };
-
-  const handleListen = (text) => {
-    speakText(text, 'en-US');
-  };
+    return () => { isCancelled = true };
+  }, [textToTranscribe, speechSettings.showPhonetics, isOnline, isAiEnabled]);
   
-  // Auto-play prompts if setting is enabled
   useEffect(() => {
-    const shouldAutoPlay = speechSettings.autoPlayPrompts;
-    if (shouldAutoPlay && currentPrompt) {
-      const textToSpeak = currentPrompt.text || currentPrompt.correctText || currentPrompt.question;
-      if (textToSpeak) {
-        const timer = setTimeout(() => speakText(textToSpeak, 'en-US'), 300);
-        return () => clearTimeout(timer);
-      }
+    if (speechSettings.autoPlayPrompts && textToTranscribe && !currentPrompt?.feedback) {
+      speakText(textToTranscribe);
     }
-  }, [currentPrompt, speechSettings.autoPlayPrompts]);
+  }, [textToTranscribe, speechSettings.autoPlayPrompts, currentPrompt?.feedback]);
 
 
-  if (!currentLesson || (isProcessing && !currentLesson.prompts && !currentLesson.chatHistory)) {
+  if (!currentLesson) {
     return (
-       <div className="exercise-card">
-         <div className="loader"><span className="icon">hourglass_top</span> Loading lesson...</div>
-       </div>
+      <div className="loader"><span className="icon">hourglass_top</span> Loading Lesson...</div>
     );
   }
 
-  // --- STANDARD PROMPT-BASED LESSONS ---
-  if (['sentence', 'situational_prompt', 'fill_in_the_blank', 'sentence_ordering'].includes(lessonType)) {
-    const { prompts, currentPromptIndex } = currentLesson;
-    const { text, correctText, jumbledText, translation, userTranscript, feedback, score, pronunciationScore, xpGained, userRecordingBase64, userRecordingMimeType } = currentPrompt;
-    
-    const isLastPrompt = currentPromptIndex === prompts.length - 1;
-    const feedbackReceived = !isProcessing && feedback;
-    const shouldBlinkNext = feedbackReceived && !isLastPrompt;
+  const { lessonType, title } = currentLesson;
+  const isInteractive = lessonType === 'roleplay' || lessonType === 'boss_battle';
+  const hasFeedback = currentPrompt?.feedback;
 
-    let promptContent, listenText, title;
-    switch(lessonType) {
-        case 'fill_in_the_blank':
-            title = 'Fill in the Blank';
-            promptContent = <HighlightBlank text={text} />;
-            listenText = correctText;
-            break;
-        case 'sentence_ordering':
-            title = 'Sentence Ordering';
-            promptContent = <span className="jumbled-text">{jumbledText}</span>;
-            listenText = correctText;
-            break;
-        default: // sentence, situational_prompt
-            title = lessonType === 'sentence' ? 'Listen & Repeat' : 'Situational Prompt';
-            promptContent = text;
-            listenText = text;
-    }
-
-    return (
-      <div className="exercise-card">
-        {isPractice && (
-          <div className="practice-mode-banner">
-            <span className="icon">fitness_center</span>
-            Practice Mode: Scores will not be saved.
-          </div>
-        )}
-        <div className="exercise-main-area">
-          <section>
-            <div className="section-header">
-              <h2><span className="icon">hearing</span>{title}</h2>
-              <span className="urdu-heading">{translations[title]}</span>
-            </div>
-            <p className="prompt-text">
-              <span>{promptContent}</span>
-              <button className="icon-button listen-prompt-button" onClick={() => handleListen(listenText)} aria-label="Listen to sentence" disabled={isRecording}>
-                <span className="icon">volume_up</span>
-              </button>
-            </p>
-            {['sentence', 'fill_in_the_blank', 'sentence_ordering'].includes(lessonType) && speechSettings.showPhonetics && (
-              <div className="phonetic-transcription">
-                {isLoadingIpa ? '...' : ipa}
-              </div>
-            )}
-            <div className="prompt-controls">
-              <div className="prompt-navigation">
-                <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>
-                <span className="counter">{currentPromptIndex + 1} / {prompts.length}</span>
-                <button className={c("button", { 'blink-guide': shouldBlinkNext })} onClick={() => changePrompt(currentPromptIndex + 1)} disabled={currentPromptIndex === prompts.length - 1 || isRecording}>Next <span className="icon">arrow_forward</span></button>
-              </div>
-            </div>
-            {translation && !userTranscript && (
-              <div className="translation-section-embedded">
-                <div className="section-header" style={{ marginBottom: '8px' }}>
-                  <h3><span className="icon">translate</span>Urdu Translation</h3>
-                  <span className="urdu-heading">{translations['Urdu Translation']}</span>
-                </div>
-                <p className="urdu-text">{translation || '...'}</p>
-              </div>
-            )}
-          </section>
-          <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userTranscript} userRecordingBase64={userRecordingBase64} userRecordingMimeType={userRecordingMimeType} />
-        </div>
-        <FeedbackSection isProcessing={isProcessing} feedback={feedback} score={score} pronunciationScore={pronunciationScore} streak={currentStreak} xpGained={xpGained} onListen={handleListen} correctAnswer={feedback && feedback !== 'Awaiting Sync' ? correctText : null}/>
-      </div>
-    );
-  }
+  const handleRecordClick = () => isRecording ? stopRecording() : startRecording();
+  const handleListenClick = () => speakText(textToTranscribe);
   
-  // --- COMPREHENSION MODE ---
-  if (lessonType === 'comprehension') {
-    const { story, prompts, currentPromptIndex } = currentLesson;
-    const { question, correctAnswer, userTranscript, feedback, score, pronunciationScore, xpGained, userRecordingBase64, userRecordingMimeType } = prompts[currentPromptIndex];
-    
-    const isLastPrompt = currentPromptIndex === prompts.length - 1;
-    const feedbackReceived = !isProcessing && feedback;
-    const shouldBlinkNext = feedbackReceived && !isLastPrompt;
-
-    return (
-      <div className="exercise-card comprehension-card">
-        {isPractice && (
-          <div className="practice-mode-banner">
-            <span className="icon">fitness_center</span>
-            Practice Mode: Scores will not be saved.
-          </div>
-        )}
-        <section className="comprehension-story">
-          <div className="section-header">
-            <h2><span className="icon">menu_book</span>Listening Comprehension</h2>
-            <span className="urdu-heading">{translations['Listening Comprehension']}</span>
-          </div>
-          <p className="story-text">{story}</p>
-          <button className="button" onClick={() => handleListen(story)} disabled={isRecording || isProcessing}>
-            <span className="icon">volume_up</span> Listen to Story
-          </button>
-        </section>
-
-        <div className="exercise-main-area">
-            <section>
-                <div className="section-header">
-                    <h2><span className="icon">quiz</span>Question {currentPromptIndex + 1}</h2>
-                </div>
-                <p className="prompt-text">
-                    <span>{question}</span>
-                </p>
-                <div className="prompt-controls">
-                <div className="prompt-navigation">
-                    <button className="button" onClick={() => changePrompt(currentPromptIndex - 1)} disabled={currentPromptIndex === 0 || isRecording}><span className="icon">arrow_back</span> Prev</button>
-                    <span className="counter">{currentPromptIndex + 1} / {prompts.length}</span>
-                    <button className={c("button", { 'blink-guide': shouldBlinkNext })} onClick={() => changePrompt(currentPromptIndex + 1)} disabled={currentPromptIndex === prompts.length - 1 || isRecording}>Next <span className="icon">arrow_forward</span></button>
-                </div>
-                </div>
-            </section>
-            <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userTranscript} userRecordingBase64={userRecordingBase64} userRecordingMimeType={userRecordingMimeType} />
+  return (
+    <div className="exercise-card">
+      <section className="prompt-section">
+        <div className="section-header">
+          <h2><span className="icon">hearing</span> 1. Listen & Understand</h2>
+          <h3 className="urdu-heading">{title}</h3>
         </div>
-        <FeedbackSection isProcessing={isProcessing} feedback={feedback} score={score} pronunciationScore={pronunciationScore} streak={currentStreak} xpGained={xpGained} onListen={handleListen} correctAnswer={feedback && feedback !== 'Awaiting Sync' ? correctAnswer : null} />
-      </div>
-    );
-  }
-
-
-  // --- ROLEPLAY & BOSS BATTLE MODE ---
-  if (lessonType === 'roleplay' || lessonType === 'boss_battle') {
-    const { scenario, chatHistory, prompt } = currentLesson;
-    const { score, pronunciationScore, xpGained, feedback } = prompt;
-    const userMessage = chatHistory.findLast(m => m.role==='user');
-    const isBossBattle = lessonType === 'boss_battle';
-
-    return (
-      <div className="exercise-card roleplay-card">
-         {isPractice && (
-          <div className="practice-mode-banner">
-            <span className="icon">fitness_center</span>
-            Practice Mode: Scores will not be saved.
+        
+        {lessonType === 'comprehension' && <p className="story-text">{currentLesson.story}</p>}
+        {isInteractive && (
+          <div className="scenario-description">{currentLesson.scenario}</div>
+        )}
+        
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <PromptDisplay lesson={currentLesson} prompt={currentPrompt} ipa={ipa} isIpaLoading={isIpaLoading} />
+          <button
+            className="icon-button listen-prompt-button"
+            onClick={handleListenClick}
+            aria-label="Listen to prompt"
+            disabled={isRecording}
+          >
+            <span className="icon">volume_up</span>
+          </button>
+        </div>
+        
+        {isMultiPrompt && (
+          <div className="prompt-controls">
+            <div className="prompt-navigation">
+              <button className="icon-button" onClick={() => changePrompt(currentLesson.currentPromptIndex - 1)} disabled={currentLesson.currentPromptIndex === 0}>
+                <span className="icon">arrow_back</span>
+              </button>
+              <span className="counter">{currentLesson.currentPromptIndex + 1} / {currentLesson.prompts.length}</span>
+              <button className="icon-button" onClick={() => changePrompt(currentLesson.currentPromptIndex + 1)} disabled={currentLesson.currentPromptIndex === currentLesson.prompts.length - 1}>
+                <span className="icon">arrow_forward</span>
+              </button>
+            </div>
           </div>
         )}
-        <section>
-          <div className="section-header">
-            <h2>
-              <span className="icon">{isBossBattle ? 'workspace_premium' : 'groups'}</span>
-              {isBossBattle ? 'Level Challenge' : 'Role Play'}: {currentLesson.title}
-            </h2>
-            <span className="urdu-heading">{translations[isBossBattle ? 'Level Challenge' : 'Role Play']}</span>
-          </div>
-          <p className="scenario-description">{scenario}</p>
+      </section>
+
+      {!isInteractive && currentPrompt.translation && (
+        <section className="translation-section">
+           <div className="section-header">
+              <h2><span className="icon">translate</span> 2. Translation</h2>
+              <h3 className="urdu-heading">ترجمہ</h3>
+            </div>
+          <p className="urdu-text">{currentPrompt.translation}</p>
+        </section>
+      )}
+
+      <section className="response-section">
+        <div className="section-header">
+          <h2><span className="icon">mic</span> {isInteractive ? "1. Your Turn" : "3. Your Turn"}</h2>
+          <h3 className="urdu-heading">اب آپکی باری</h3>
+        </div>
+        {isInteractive && (
           <div className="chat-container">
-            {chatHistory.map((msg, index) => (
+            {currentLesson.chatHistory.map((msg, index) => (
               <div key={index} className={c('chat-bubble', msg.role)}>
                 {msg.role === 'user' && msg.audioBase64 && <UserAudioPlayer audioBase64={msg.audioBase64} audioMimeType={msg.audioMimeType} />}
                 <p>{msg.text}</p>
-                {msg.role === 'ai' && (
-                    <button className="icon-button" onClick={() => handleListen(msg.text)} disabled={isRecording || isProcessing}>
-                        <span className="icon">volume_up</span>
-                    </button>
-                )}
+                {msg.role === 'ai' && <button className="icon-button" onClick={() => speakText(msg.text)}><span className="icon">volume_up</span></button>}
               </div>
             ))}
-            {isProcessing && chatHistory[chatHistory.length - 1].role === 'user' && (
-              <div className="chat-bubble ai typing">
-                <div className="typing-indicator"></div>
-              </div>
-            )}
           </div>
+        )}
+        <div className="response-area">
+          {(!isAiEnabled || !isOnline) ? (
+            <div className="ai-disabled-message">
+              <span className="icon" style={{fontSize: '48px', color: 'var(--text-tertiary)'}}>
+                {isAiEnabled ? 'wifi_off' : 'toggle_off'}
+              </span>
+              <p>
+                {isAiEnabled
+                  ? "You are offline. AI feedback is unavailable, but you can still record and listen to your audio."
+                  : "AI features are disabled. Please enable them in the header to get feedback."
+                }
+              </p>
+            </div>
+          ) : null}
+          <button
+            className={c('button record-button', { primary: !isRecording, recording: isRecording })}
+            onClick={handleRecordClick}
+            disabled={isProcessing}
+          >
+            <span className="icon">mic</span>
+            {isRecording ? 'Recording...' : 'Record Answer'}
+            <span className="record-button-translation">{isRecording ? '... ریکارڈنگ' : 'جواب ریکارڈ کریں'}</span>
+          </button>
+          {isProcessing && <div className="loader" style={{minHeight: 'auto', paddingTop: '16px'}}><span className="icon">hourglass_top</span> Analyzing...</div>}
+          {currentPrompt.userTranscript && !isProcessing && (
+            <div className="transcript">
+              <h3>Your Answer (Transcript)</h3>
+              <p>"{currentPrompt.userTranscript}"</p>
+            </div>
+          )}
+        </div>
+      </section>
+      
+      {hasFeedback && (
+        <section className="feedback-section">
+            <div className="feedback-header">
+                <h2><span className="icon">auto_awesome</span> 4. AI Feedback</h2>
+                 <h3 className="urdu-heading">AI فیڈبیک</h3>
+            </div>
+            {currentPrompt.feedback === 'OFFLINE_RECORDING' ? (
+                <div className="offline-comparison-section">
+                  <h3 className="offline-header"><span className="icon">wifi_off</span>Offline Recording Saved</h3>
+                  <p className="offline-instruction">Compare your recording to the original prompt.</p>
+                  <div className="audio-players-container">
+                    <div className="audio-player">
+                      <p>Original</p>
+                      <button className="button" onClick={handleListenClick}><span className="icon">play_arrow</span> Listen</button>
+                    </div>
+                    <div className="audio-player">
+                       <p>Your Recording</p>
+                       <UserAudioPlayer audioBase64={currentPrompt.userRecordingBase64} audioMimeType={currentPrompt.userRecordingMimeType} />
+                    </div>
+                  </div>
+                </div>
+            ) : (
+              <>
+                <FeedbackHUD score={currentPrompt.score} pronunciationScore={currentPrompt.pronunciationScore} xpGained={currentPrompt.xpGained} streak={currentStreak} />
+                <p className="feedback-text">{currentPrompt.feedback}</p>
+                 {currentPrompt.userRecordingBase64 && (
+                  <UserAudioPlayer audioBase64={currentPrompt.userRecordingBase64} audioMimeType={currentPrompt.userRecordingMimeType} />
+                )}
+                {currentLesson.lessonType === 'sentence_ordering' && currentPrompt.score < 100 && (
+                  <div className="correct-answer-display">
+                    <h4>Correct Sentence:</h4>
+                    <p>{currentPrompt.correctText}</p>
+                  </div>
+                )}
+              </>
+            )}
         </section>
-        <ResponseSection onRecord={handleRecord} isRecording={isRecording} isProcessing={isProcessing} userTranscript={userMessage?.text} />
-        <FeedbackSection isProcessing={isProcessing && !!userMessage} feedback={feedback} score={score} pronunciationScore={pronunciationScore} streak={currentStreak} xpGained={xpGained} onListen={handleListen} />
-      </div>
-    );
-  }
-
-  return <div className="exercise-card"><p>Unknown lesson type.</p></div>;
+      )}
+    </div>
+  );
 }

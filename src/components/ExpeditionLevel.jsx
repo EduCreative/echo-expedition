@@ -15,14 +15,17 @@ function LessonNode({
   lessonIndex,
   isCompleted,
   isUnlocked,
+  isNewlyCompleted,
 }) {
-  const { isProcessing, isOnline } = useStore();
+  const { isProcessing, isOnline, isAiEnabled } = useStore();
   const isInteractive = lesson.type === 'roleplay' || lesson.type === 'boss_battle';
-  const isDisabled = isProcessing || !isUnlocked || (isInteractive && !isOnline);
+  const isDisabled = isProcessing || !isUnlocked || (isInteractive && (!isOnline || !isAiEnabled));
   const isBoss = lesson.type === 'boss_battle';
 
   let title;
-  if (isDisabled && isInteractive && !isOnline) {
+  if (isDisabled && isInteractive && !isAiEnabled) {
+      title = "This lesson requires AI features to be enabled.";
+  } else if (isDisabled && isInteractive && !isOnline) {
       title = "This lesson requires an internet connection.";
   } else if (isUnlocked) {
     title = `${lesson.title} (${lesson.difficulty})${isCompleted ? ' - Completed' : ''}`;
@@ -30,9 +33,14 @@ function LessonNode({
     title = 'Locked';
   }
 
+
   return (
     <button
-      className={c('lesson-node', lesson.difficulty?.toLowerCase(), { completed: isCompleted, 'boss-battle': isBoss })}
+      className={c('lesson-node', lesson.difficulty?.toLowerCase(), {
+         completed: isCompleted,
+         'boss-battle': isBoss,
+         'highlight-newly-completed': isNewlyCompleted,
+        })}
       onClick={() => startLesson(levelId, lessonIndex)}
       disabled={isDisabled}
       title={title}
@@ -54,6 +62,7 @@ export default function ExpeditionLevel({
   prevLevelAverageScore,
   prevLevelCompletedCount,
   prevLevelName,
+  justCompleted,
 }) {
   const completedCount = Object.keys(progress).length;
   const totalCount = levelData.lessons.length;
@@ -118,6 +127,7 @@ export default function ExpeditionLevel({
                 lessonIndex={index}
                 isCompleted={progress[index] !== undefined}
                 isUnlocked={isUnlocked}
+                isNewlyCompleted={justCompleted?.levelId === levelId && justCompleted?.lessonId === index}
               />
           ))}
         </div>

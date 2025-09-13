@@ -1,5 +1,3 @@
-
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -10,31 +8,44 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const model = 'gemini-2.5-flash';
 const imageModel = 'imagen-4.0-generate-001';
 
+/**
+ * Robustly extracts the text content from a GenerateContentResponse.
+ * This should be used whenever a raw response object is received from generateContent.
+ * @param {import('@google/genai').GenerateContentResponse} response The response from the AI model.
+ * @returns {string} The extracted text.
+ * @throws {Error} If text cannot be extracted.
+ */
+// Fix: Simplified to use the recommended `response.text` accessor, per @google/genai guidelines.
+// The previous implementation used an unsupported fallback path.
+export function getText(response) {
+  // The `GenerateContentResponse` object has a property called `text` that directly
+  // provides the string output. Accessing it is the recommended and safest method.
+  if (response && typeof response.text === 'string') {
+    return response.text;
+  }
+
+  // If we don't have a string, the response is malformed or was blocked.
+  console.error('Could not extract text from AI response. The .text property was not a string. Full response:', response);
+  throw new Error('Invalid response format from AI: could not find text.');
+}
+
+
 async function callApi(prompt) {
   try {
     const response = await ai.models.generateContent({
       model,
-      contents: { parts: [{ text: prompt }] },
+      contents: prompt,
     });
     
-    const text = response.text;
+    const text = getText(response);
 
-    // The most robust way to prevent React rendering errors is to ensure we ONLY
-    // return a string. If the response.text accessor does not return a string,
-    // something is wrong with the response and we should treat it as an error.
-    if (typeof text === 'string') {
-      // Clean up potential markdown or unwanted characters
-      return text.trim().replace(/^["']|["']$/g, '');
-    }
-
-    // If text is not a string, log the unexpected response and throw an error.
-    console.warn('AI response.text was not a string. Full response:', response);
-    throw new Error('Invalid response format from AI: response.text is not a string.');
+    // Clean up potential markdown or unwanted characters
+    return text.trim().replace(/^["']|["']$/g, '');
 
   } catch (error) {
-    // This will catch errors from the API call itself, or the error thrown above.
+    // This will catch errors from the API call itself, or the error thrown in getText.
     console.error("Error generating content:", error);
-    // Return a user-friendly error message that is guaranteed to be a string.
+    // Re-throw with a generic message
     throw new Error("Could not get a response from the AI.");
   }
 }

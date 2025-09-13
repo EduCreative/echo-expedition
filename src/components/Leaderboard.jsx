@@ -4,7 +4,7 @@
 */
 import { useState, useMemo, useEffect } from 'react';
 import useStore from '../lib/store';
-import { goToDashboard } from '../lib/actions';
+import { goToDashboard, addToast } from '../lib/actions';
 import c from 'clsx';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -20,20 +20,30 @@ async function fetchLeaderboardData() {
 
     const usersData = {};
     usersSnapshot.forEach(doc => {
-        usersData[doc.id] = doc.data();
+        const data = doc.data();
+        // SAFE: Only extract primitive data to avoid circular references
+        usersData[doc.id] = { name: data.name };
     });
 
     const progressData = {};
     progressSnapshot.forEach(doc => {
-        progressData[doc.id] = doc.data();
+        const data = doc.data();
+        // SAFE: Only extract primitive data
+        progressData[doc.id] = {
+            pronunciationRaceHighScore: data.pronunciationRaceHighScore,
+            listeningDrillHighScore: data.listeningDrillHighScore,
+        };
     });
 
-    // Combine data
+    // Now, when combining, we are working with clean, safe objects.
     const combinedData = Object.keys(usersData).map(uid => {
+        const user = usersData[uid] || {};
+        const progress = progressData[uid] || {};
         return {
             id: uid,
-            name: usersData[uid].name || 'Anonymous',
-            ...progressData[uid]
+            name: user.name || 'Anonymous',
+            pronunciationRaceHighScore: progress.pronunciationRaceHighScore || 0,
+            listeningDrillHighScore: progress.listeningDrillHighScore || 0,
         };
     });
 
@@ -43,19 +53,32 @@ async function fetchLeaderboardData() {
 
 export default function Leaderboard() {
   const [activeBoard, setActiveBoard] = useState('race'); // 'race' or 'drill'
-  const { user: currentUser } = useStore();
+  const { user: currentUser, isOnline } = useStore();
   const [allUsersData, setAllUsersData] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
+        if (!isOnline) {
+            addToast({ title: 'Offline', message: 'Leaderboard cannot be loaded while offline.', icon: 'wifi_off' });
+            setIsLoading(false);
+            setAllUsersData([]); // Clear stale data
+            return;
+        }
         setIsLoading(true);
-        const data = await fetchLeaderboardData();
-        setAllUsersData(data);
-        setIsLoading(false);
+        try {
+            const data = await fetchLeaderboardData();
+            setAllUsersData(data);
+        } catch (error) {
+            console.error("Failed to fetch leaderboard data:", error);
+            addToast({ title: 'Error', message: 'Could not load leaderboard.', icon: 'error' });
+            setAllUsersData([]);
+        } finally {
+            setIsLoading(false);
+        }
     }
     loadData();
-  }, []);
+  }, [isOnline]);
 
   const sortedUsers = useMemo(() => {
     const scoreKey = activeBoard === 'race' ? 'pronunciationRaceHighScore' : 'listeningDrillHighScore';

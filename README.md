@@ -66,6 +66,11 @@ An application for English language learners of all levels to improve their list
     export const googleProvider = new GoogleAuthProvider();
     ```
 
+5.  **Authorize Domains for Authentication:**
+    -   In your Firebase Console, go to **Authentication** -> **Settings** -> **Authorized domains**.
+    -   Click **Add domain** and enter `localhost` (or the domain/IP provided by your development server, e.g., `127.0.0.1`).
+    -   This is required for Google Sign-In and other providers to work during development. Remember to add your production domain here as well when you deploy your app.
+
 ## Running the Application
 
 Once the setup is complete, you can run the development server:

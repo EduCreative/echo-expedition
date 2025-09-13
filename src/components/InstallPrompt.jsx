@@ -6,9 +6,9 @@ import useStore from '../lib/store';
 import { promptToInstall, dismissInstallPrompt } from '../lib/actions';
 
 export default function InstallPrompt() {
-  const { installPromptEvent, installPromptDismissed } = useStore();
+  const canInstall = useStore(state => state.canInstall);
 
-  if (!installPromptEvent || installPromptDismissed) {
+  if (!canInstall) {
     return null;
   }
 

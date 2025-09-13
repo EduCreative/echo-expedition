@@ -8,7 +8,7 @@ import ExpeditionLevel from './ExpeditionLevel';
 
 const SCORE_UNLOCK_THRESHOLD = 70; // Average score required to unlock the next level
 
-export default function ExpeditionMap() {
+export default function ExpeditionMap({ justCompleted }) {
   const { progress } = useStore();
   const levelEntries = Object.entries(levels);
 
@@ -53,6 +53,7 @@ export default function ExpeditionMap() {
               prevLevelAverageScore={prevLevelAverageScore}
               prevLevelCompletedCount={prevLevelCompletedCount}
               prevLevelName={prevLevelName}
+              justCompleted={justCompleted}
             />
           );
         })}

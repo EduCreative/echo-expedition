@@ -6,7 +6,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Bar, Doughnut, Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import useStore from '../lib/store';
-import { goToDashboard, suspendUser, deleteUser, resetUserProgress, fetchAllUsersForAdmin } from '../lib/actions';
+import { goToDashboard, suspendUser, deleteUser, resetUserProgress, fetchAllUsersForAdmin, addToast } from '../lib/actions';
 import c from 'clsx';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend);
@@ -114,7 +114,7 @@ function AdminAnalytics({ users }) {
 
 
 export default function AdminPanel() {
-  const { user } = useStore();
+  const { user, isOnline } = useStore();
   const [allUsers, setAllUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -126,15 +126,28 @@ export default function AdminPanel() {
   }
   
   const refreshUsers = async () => {
+      if (!isOnline) {
+        addToast({ title: 'Offline', message: 'User data cannot be fetched while offline.', icon: 'wifi_off' });
+        setIsLoading(false);
+        setAllUsers([]); // Clear data when offline
+        return;
+      }
       setIsLoading(true);
-      const users = await fetchAllUsersForAdmin();
-      setAllUsers(users);
-      setIsLoading(false);
+      try {
+        const users = await fetchAllUsersForAdmin();
+        setAllUsers(users);
+      } catch (error) {
+        console.error("Failed to fetch admin user list:", error);
+        addToast({ title: 'Error', message: 'Could not fetch user data.', icon: 'error' });
+        setAllUsers([]);
+      } finally {
+        setIsLoading(false);
+      }
   };
 
   useEffect(() => {
     refreshUsers();
-  }, []);
+  }, [isOnline]);
 
   const filteredUsers = useMemo(() => {
     const lowercasedFilter = searchTerm.toLowerCase();

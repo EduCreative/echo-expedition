@@ -5,7 +5,7 @@
 import {useState, useEffect, useRef} from 'react';
 import c from 'clsx';
 import useStore from '../lib/store';
-import { logout, setSpeechSetting, addToast, goToAdminPanel, toggleVoiceCommands, promptToInstall } from '../lib/actions';
+import { logout, setSpeechSetting, addToast, goToAdminPanel, toggleVoiceCommands, promptToInstall, toggleAiSupport } from '../lib/actions';
 import Logo from './Logo';
 import AboutModal from './AboutModal';
 
@@ -44,17 +44,20 @@ function VoiceCommandHelpModal({ onClose }) {
 
 function DropdownToggleItem({ id, icon, label, checked, onChange }) {
   return (
-    <li className="dropdown-item-toggle" onClick={onChange}>
+    // The `onClick` is removed from the `li` to prevent double-firing events.
+    <li className="dropdown-item-toggle">
+      {/* The `htmlFor` connects this label to the checkbox, so clicking the text will trigger the input's onChange. */}
       <label htmlFor={id} className="dropdown-item-label">
         <span className="icon">{icon}</span> {label}
       </label>
+      {/* This label acts as the container for the visual switch. Clicking it also triggers the input's onChange. */}
       <label className="switch small">
         <input
           type="checkbox"
           id={id}
           checked={checked}
-          onChange={() => {}} // The parent onClick handles the change
-          readOnly
+          // The `onChange` is now directly on the input, which is the standard React pattern.
+          onChange={onChange}
         />
         <span className="slider round"></span>
       </label>
@@ -94,7 +97,7 @@ function DropdownSliderItem({ icon, label, value, onChange, min, max, step }) {
 }
 
 export default function Header({ isDark, toggleTheme }) {
-  const { user, speechSettings, installPromptEvent, voiceCommandState } = useStore();
+  const { user, speechSettings, canInstall, voiceCommandState, isAiEnabled } = useStore();
   const [showProfile, setShowProfile] = useState(false);
   const [showVoiceHelp, setShowVoiceHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -165,6 +168,14 @@ export default function Header({ isDark, toggleTheme }) {
       <header>
         <h1><Logo />Echo Expedition</h1>
         <div className="header-controls">
+          <button
+            className={c('icon-button ai-toggle', { active: isAiEnabled })}
+            onClick={toggleAiSupport}
+            aria-label="Toggle AI Features"
+            title={isAiEnabled ? 'Disable AI Features' : 'Enable AI Features'}
+          >
+            <span className="icon">auto_awesome</span>
+          </button>
           <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
             <span className="icon">{isDark ? 'light_mode' : 'dark_mode'}</span>
           </button>
@@ -244,7 +255,7 @@ export default function Header({ isDark, toggleTheme }) {
                         <span className="icon">info</span> About App
                     </button>
                   </li>
-                  {installPromptEvent && (
+                  {canInstall && (
                     <li>
                       <button onClick={() => { promptToInstall(); setShowProfile(false); }}>
                         <span className="icon">install_desktop</span> Install App

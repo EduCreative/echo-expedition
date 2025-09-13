@@ -15,7 +15,7 @@ import ConversationStarterModal from './ConversationStarterModal';
 const XP_PER_LEVEL = 500;
 
 function PronunciationRaceWidget() {
-    const { isProcessing, isOnline, pronunciationRaceHighScore } = useStore();
+    const { isProcessing, isOnline, pronunciationRaceHighScore, isAiEnabled } = useStore();
     return (
         <div className="pronunciation-race-widget">
             <div className="widget-header">
@@ -28,7 +28,8 @@ function PronunciationRaceWidget() {
             <button
               className="button primary"
               onClick={startPronunciationRace}
-              disabled={isProcessing || !isOnline}
+              disabled={isProcessing || !isOnline || !isAiEnabled}
+              title={!isAiEnabled ? 'AI features are disabled' : ''}
             >
                 Start Race!
             </button>
@@ -79,7 +80,7 @@ function PracticeModeWidget() {
 }
 
 function FreeFormConversationWidget() {
-    const { isProcessing, isOnline } = useStore();
+    const { isProcessing, isOnline, isAiEnabled } = useStore();
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     return (
@@ -93,7 +94,8 @@ function FreeFormConversationWidget() {
                 <button
                 className="button primary"
                 onClick={() => setIsModalOpen(true)}
-                disabled={isProcessing || !isOnline}
+                disabled={isProcessing || !isOnline || !isAiEnabled}
+                title={!isAiEnabled ? 'AI features are disabled' : ''}
                 >
                     Choose a Scenario
                 </button>
@@ -122,11 +124,11 @@ function LeaderboardWidget() {
 
 function CustomLessonCreator() {
   const [topic, setTopic] = useState('');
-  const { isProcessing, isOnline } = useStore();
+  const { isProcessing, isOnline, isAiEnabled } = useStore();
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (topic.trim() && !isProcessing && isOnline) {
+    if (topic.trim() && !isProcessing && isOnline && isAiEnabled) {
       startCustomLesson(topic.trim());
     }
   };
@@ -142,11 +144,11 @@ function CustomLessonCreator() {
           type="text"
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          placeholder={isOnline ? "e.g., Ordering coffee..." : "Internet connection required"}
-          disabled={isProcessing || !isOnline}
+          placeholder={!isAiEnabled ? 'Enable AI features to generate lessons' : (isOnline ? "e.g., Ordering coffee..." : "Internet connection required")}
+          disabled={isProcessing || !isOnline || !isAiEnabled}
           aria-label="Custom lesson topic"
         />
-        <button type="submit" className="button primary" disabled={!topic.trim() || isProcessing || !isOnline}>
+        <button type="submit" className="button primary" disabled={!topic.trim() || isProcessing || !isOnline || !isAiEnabled}>
           <span className="icon">auto_awesome</span> Generate
         </button>
       </form>
@@ -173,7 +175,7 @@ function UserProfileSummary({ user }) {
 }
 
 function AchievementsWidget() {
-  const unlockedAchievements = useStore(state => state.achievements);
+  const { achievements: unlockedAchievements, justUnlockedAchievements } = useStore();
 
   return (
     <div className="achievements-widget">
@@ -181,10 +183,14 @@ function AchievementsWidget() {
        <div className="achievements-grid">
         {achievements.map(ach => {
           const isUnlocked = unlockedAchievements.includes(ach.id);
+          const isNewlyUnlocked = justUnlockedAchievements.includes(ach.id);
           return (
             <div
               key={ach.id}
-              className={c('achievement-badge', { unlocked: isUnlocked })}
+              className={c('achievement-badge', { 
+                  unlocked: isUnlocked,
+                  'highlight-newly-unlocked': isNewlyUnlocked,
+                })}
               title={`${ach.name}\n${ach.description}`}
             >
               <span className="icon">{ach.icon}</span>
@@ -197,7 +203,18 @@ function AchievementsWidget() {
 }
 
 export default function Dashboard() {
-  const { user, isProcessing, progress, dailyStreak, showOnboarding } = useStore();
+  const { user, isProcessing, progress, dailyStreak, showOnboarding, justCompleted, justUnlockedAchievements } = useStore();
+
+  // Effect to clear highlight animations after a few seconds
+  useEffect(() => {
+    if (justCompleted || justUnlockedAchievements.length > 0) {
+        const timer = setTimeout(() => {
+            useStore.setState({ justCompleted: null, justUnlockedAchievements: [] });
+        }, 5000); // Highlight for 5 seconds
+
+        return () => clearTimeout(timer);
+    }
+  }, [justCompleted, justUnlockedAchievements]);
 
   const { totalLessonsCompleted, totalXpEarned } = useMemo(() => {
     if (!user) return { totalLessonsCompleted: 0, totalXpEarned: 0 };
@@ -248,7 +265,7 @@ export default function Dashboard() {
       </div>
       
       <AchievementsWidget />
-      <ExpeditionMap />
+      <ExpeditionMap justCompleted={justCompleted} />
       
       <div className="additional-tools">
         <h3 className="additional-tools-header">Additional Tools for Fluency</h3>
