@@ -28,7 +28,7 @@ import Leaderboard from './Leaderboard';
 import c from 'clsx';
 import { levels } from '../lib/prompts';
 import { auth, db } from '../lib/firebase';
-import { onAuthStateChanged, signOut, getRedirectResult } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import GraffitiCongrats from './GraffitiCongrats';
 import Onboarding from './Onboarding';
@@ -124,120 +124,93 @@ export default function App() {
   const shouldRestartRecognition = useRef(true);
   
   // --- Firebase Auth State Listener ---
-  // This hook handles all authentication logic, including completing sign-in redirects.
-  // It is structured to prevent a race condition by only attaching the onAuthStateChanged
-  // listener *after* getRedirectResult has completed.
+  // This hook handles all authentication logic.
   useEffect(() => {
-    let unsubscribeAuth = () => {};
+    // The onAuthStateChanged listener is the single source of truth for auth state.
+    // It will fire when the app loads, and anytime the user signs in or out.
+    // This is sufficient for both initial auth check and handling popup sign-ins.
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      unsubscribeProgressRef.current();
 
-    // First, handle the redirect result. This is crucial for the login flow.
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result) {
-          // A user has just signed in. The listener below will handle the state update,
-          // but we can show an immediate welcome message.
-          addToast({
-            title: `Welcome, ${result.user.displayName}!`,
-            message: 'You have been successfully signed in.',
-            icon: 'login',
+      try {
+        if (firebaseUser) {
+          setUser({
+            uid: firebaseUser.uid,
+            displayName: firebaseUser.displayName,
+            photoURL: firebaseUser.photoURL,
+            email: firebaseUser.email,
+            isAnonymous: firebaseUser.isAnonymous,
           });
-        }
-      })
-      .catch((error) => {
-        console.error("Redirect sign-in error:", error);
-        addToast({
-          title: 'Sign-in Failed',
-          message: 'There was an error during the sign-in process. Please try again.',
-          icon: 'error',
-        });
-      })
-      .finally(() => {
-        // NOW that any potential redirect has been processed, we can safely attach
-        // the listener. This prevents it from firing with a premature `null` user
-        // and causing a reload loop.
-        unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-          unsubscribeProgressRef.current();
 
-          try {
-            if (firebaseUser) {
-              setUser({
-                uid: firebaseUser.uid,
-                displayName: firebaseUser.displayName,
-                photoURL: firebaseUser.photoURL,
-                email: firebaseUser.email,
-                isAnonymous: firebaseUser.isAnonymous,
-              });
+          const userRef = doc(db, "users", firebaseUser.uid);
+          const progressRef = doc(db, "progress", firebaseUser.uid);
+          const userDoc = await getDoc(userRef);
 
-              const userRef = doc(db, "users", firebaseUser.uid);
-              const progressRef = doc(db, "progress", firebaseUser.uid);
-              const userDoc = await getDoc(userRef);
-
-              if (!userDoc.exists()) {
-                const batch = writeBatch(db);
-                const userData = {
-                  id: firebaseUser.uid,
-                  name: firebaseUser.displayName || 'Guest User',
-                  email: firebaseUser.email,
-                  picture: firebaseUser.photoURL,
-                  registrationDate: new Date().toISOString(),
-                  lastLogin: new Date().toISOString(),
-                  status: 'active',
-                  hasOnboarded: false,
-                };
-                const progressData = {
-                  progress: {},
-                  dailyStreak: { count: 0, lastUpdated: null },
-                  achievements: [],
-                  pronunciationRaceHighScore: 0,
-                  listeningDrillHighScore: 0,
-                  user: { xp: 0, level: 1 },
-                };
-                batch.set(userRef, userData);
-                batch.set(progressRef, progressData);
-                await batch.commit();
-                updateProgressFromSnapshot(progressData);
-                useStore.setState({ showOnboarding: true });
-              } else {
-                const progressDoc = await getDoc(progressRef);
-                if (progressDoc.exists()) {
-                  updateProgressFromSnapshot(progressDoc.data());
-                }
-                await setDoc(userRef, { lastLogin: new Date().toISOString() }, { merge: true });
-                useStore.setState({ showOnboarding: !userDoc.data().hasOnboarded });
-              }
-
-              unsubscribeProgressRef.current = onSnapshot(progressRef, (snapshot) => {
-                if (snapshot.exists()) {
-                  updateProgressFromSnapshot(snapshot.data());
-                }
-              }, (error) => {
-                 console.error("Firestore snapshot error:", error);
-                 addToast({ title: 'Sync Error', message: 'Could not sync latest progress.', icon: 'sync_problem' });
-              });
-
-            } else {
-              const { user: localUser } = useStore.getState();
-              if (localUser && (localUser.isAnonymous || localUser.isDevAdmin)) {
-                // A local session is active, don't clear it.
-              } else {
-                clearUserSession();
-              }
+          if (!userDoc.exists()) {
+            const batch = writeBatch(db);
+            const userData = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || 'Guest User',
+              email: firebaseUser.email,
+              picture: firebaseUser.photoURL,
+              registrationDate: new Date().toISOString(),
+              lastLogin: new Date().toISOString(),
+              status: 'active',
+              hasOnboarded: false,
+            };
+            const progressData = {
+              progress: {},
+              dailyStreak: { count: 0, lastUpdated: null },
+              achievements: [],
+              pronunciationRaceHighScore: 0,
+              listeningDrillHighScore: 0,
+              user: { xp: 0, level: 1 },
+            };
+            batch.set(userRef, userData);
+            batch.set(progressRef, progressData);
+            await batch.commit();
+            updateProgressFromSnapshot(progressData);
+            useStore.setState({ showOnboarding: true });
+          } else {
+            const progressDoc = await getDoc(progressRef);
+            if (progressDoc.exists()) {
+              updateProgressFromSnapshot(progressDoc.data());
             }
-          } catch (error) {
-            console.error("Critical error during user session initialization:", error);
-            addToast({
-              title: 'Authentication Error',
-              message: 'Could not load your session. Please sign in again.',
-              icon: 'error',
-              duration: 7000,
-            });
-            if (auth.currentUser) await signOut(auth);
-            clearUserSession();
-          } finally {
-            useStore.setState({ isAuthenticating: false });
+            await setDoc(userRef, { lastLogin: new Date().toISOString() }, { merge: true });
+            useStore.setState({ showOnboarding: !userDoc.data().hasOnboarded });
           }
+
+          unsubscribeProgressRef.current = onSnapshot(progressRef, (snapshot) => {
+            if (snapshot.exists()) {
+              updateProgressFromSnapshot(snapshot.data());
+            }
+          }, (error) => {
+              console.error("Firestore snapshot error:", error);
+              addToast({ title: 'Sync Error', message: 'Could not sync latest progress.', icon: 'sync_problem' });
+          });
+
+        } else {
+          const { user: localUser } = useStore.getState();
+          if (localUser && (localUser.isAnonymous || localUser.isDevAdmin)) {
+            // A local session is active, don't clear it.
+          } else {
+            clearUserSession();
+          }
+        }
+      } catch (error) {
+        console.error("Critical error during user session initialization:", error);
+        addToast({
+          title: 'Authentication Error',
+          message: 'Could not load your session. Please sign in again.',
+          icon: 'error',
+          duration: 7000,
         });
-      });
+        if (auth.currentUser) await signOut(auth);
+        clearUserSession();
+      } finally {
+        useStore.setState({ isAuthenticating: false });
+      }
+    });
     
     return () => {
       unsubscribeAuth();

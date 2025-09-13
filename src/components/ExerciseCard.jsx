@@ -4,7 +4,7 @@
 */
 import { useEffect, useState, useMemo, useRef } from 'react';
 import useStore from '../lib/store';
-import { startRecording, stopRecording, speakText, changePrompt } from '../lib/actions';
+import { startRecording, stopRecording, speakText, changePrompt, submitForFeedback, discardRecording } from '../lib/actions';
 import { getPhoneticTranscription } from '../lib/llm';
 import c from 'clsx';
 
@@ -48,13 +48,24 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
     e.stopPropagation();
     const audio = audioRef.current;
     if (!audio || !audioSrc) return;
+  
     if (isPlaying) {
       audio.pause();
+      setIsPlaying(false);
     } else {
-      if (audio.ended) audio.currentTime = 0;
-      audio.play();
+      if (audio.ended) {
+        audio.currentTime = 0;
+      }
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => setIsPlaying(true))
+          .catch(error => {
+            console.error("Audio playback failed:", error);
+            setIsPlaying(false);
+          });
+      }
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleSeek = (e) => {
@@ -200,10 +211,10 @@ export default function ExerciseCard() {
   }, [textToTranscribe, speechSettings.showPhonetics, isOnline, isAiEnabled]);
   
   useEffect(() => {
-    if (speechSettings.autoPlayPrompts && textToTranscribe && !currentPrompt?.feedback) {
+    if (speechSettings.autoPlayPrompts && textToTranscribe && !currentPrompt?.feedback && !currentPrompt?.pendingRecording) {
       speakText(textToTranscribe);
     }
-  }, [textToTranscribe, speechSettings.autoPlayPrompts, currentPrompt?.feedback]);
+  }, [textToTranscribe, speechSettings.autoPlayPrompts, currentPrompt?.feedback, currentPrompt?.pendingRecording]);
 
 
   if (!currentLesson) {
@@ -215,6 +226,10 @@ export default function ExerciseCard() {
   const { lessonType, title } = currentLesson;
   const isInteractive = lessonType === 'roleplay' || lessonType === 'boss_battle';
   const hasFeedback = currentPrompt?.feedback;
+  const { pendingRecording } = currentPrompt || {};
+  const isNotLastPrompt = isMultiPrompt && currentLesson.currentPromptIndex < currentLesson.prompts.length - 1;
+  const shouldBlinkNext = hasFeedback && isNotLastPrompt;
+
 
   const handleRecordClick = () => isRecording ? stopRecording() : startRecording();
   const handleListenClick = () => speakText(textToTranscribe);
@@ -251,7 +266,7 @@ export default function ExerciseCard() {
                 <span className="icon">arrow_back</span>
               </button>
               <span className="counter">{currentLesson.currentPromptIndex + 1} / {currentLesson.prompts.length}</span>
-              <button className="icon-button" onClick={() => changePrompt(currentLesson.currentPromptIndex + 1)} disabled={currentLesson.currentPromptIndex === currentLesson.prompts.length - 1}>
+              <button className={c('icon-button', { 'blink-guide-next': shouldBlinkNext })} onClick={() => changePrompt(currentLesson.currentPromptIndex + 1)} disabled={!isNotLastPrompt}>
                 <span className="icon">arrow_forward</span>
               </button>
             </div>
@@ -286,35 +301,49 @@ export default function ExerciseCard() {
           </div>
         )}
         <div className="response-area">
-          {(!isAiEnabled || !isOnline) ? (
-            <div className="ai-disabled-message">
-              <span className="icon" style={{fontSize: '48px', color: 'var(--text-tertiary)'}}>
-                {isAiEnabled ? 'wifi_off' : 'toggle_off'}
-              </span>
-              <p>
-                {isAiEnabled
-                  ? "You are offline. AI feedback is unavailable, but you can still record and listen to your audio."
-                  : "AI features are disabled. Please enable them in the header to get feedback."
-                }
-              </p>
+           {pendingRecording && !hasFeedback ? (
+            <div className="recording-preview">
+              <div className="transcript">
+                <h3>Your Answer (Preview)</h3>
+                <p>"{pendingRecording.transcript}"</p>
+              </div>
+              <UserAudioPlayer audioBase64={pendingRecording.audioBase64} audioMimeType={pendingRecording.audioMimeType} />
+              <div className="preview-actions">
+                <button className="button" onClick={discardRecording}>
+                  <span className="icon">replay</span> Record Again
+                </button>
+                <button className="button primary" onClick={submitForFeedback} disabled={isProcessing}>
+                  {isProcessing ? 'Submitting...' : 'Submit for Feedback'}
+                </button>
+              </div>
             </div>
-          ) : null}
-          <button
-            className={c('button record-button', { primary: !isRecording, recording: isRecording })}
-            onClick={handleRecordClick}
-            disabled={isProcessing}
-          >
-            <span className="icon">mic</span>
-            {isRecording ? 'Recording...' : 'Record Answer'}
-            <span className="record-button-translation">{isRecording ? '... ریکارڈنگ' : 'جواب ریکارڈ کریں'}</span>
-          </button>
+          ) : (
+             <>
+                {(!isAiEnabled || !isOnline) && !isInteractive && (
+                    <div className="ai-disabled-message">
+                    <span className="icon" style={{fontSize: '48px', color: 'var(--text-tertiary)'}}>
+                        {isAiEnabled ? 'wifi_off' : 'toggle_off'}
+                    </span>
+                    <p>
+                        {isAiEnabled
+                        ? "You are offline. AI feedback is unavailable, but you can still record and listen to your audio."
+                        : "AI features are disabled. Please enable them in the header to get feedback."
+                        }
+                    </p>
+                    </div>
+                )}
+                <button
+                    className={c('button record-button', { primary: !isRecording, recording: isRecording })}
+                    onClick={handleRecordClick}
+                    disabled={isProcessing || hasFeedback}
+                >
+                    <span className="icon">mic</span>
+                    {isRecording ? 'Recording...' : hasFeedback ? 'Answer Submitted' : 'Record Answer'}
+                    <span className="record-button-translation">{isRecording ? '... ریکارڈنگ' : hasFeedback ? 'جواب جمع کر دیا گیا' : 'جواب ریکارڈ کریں'}</span>
+                </button>
+             </>
+           )}
           {isProcessing && <div className="loader" style={{minHeight: 'auto', paddingTop: '16px'}}><span className="icon">hourglass_top</span> Analyzing...</div>}
-          {currentPrompt.userTranscript && !isProcessing && (
-            <div className="transcript">
-              <h3>Your Answer (Transcript)</h3>
-              <p>"{currentPrompt.userTranscript}"</p>
-            </div>
-          )}
         </div>
       </section>
       
@@ -328,7 +357,11 @@ export default function ExerciseCard() {
                 <div className="offline-comparison-section">
                   <h3 className="offline-header"><span className="icon">wifi_off</span>Offline Recording Saved</h3>
                   <p className="offline-instruction">Compare your recording to the original prompt.</p>
-                  <div className="audio-players-container">
+                  <div className="transcript" style={{marginTop: '16px'}}>
+                    <h3>Your Answer</h3>
+                    <p>"{currentPrompt.userTranscript}"</p>
+                  </div>
+                  <div className="audio-comparison-section">
                     <div className="audio-player">
                       <p>Original</p>
                       <button className="button" onClick={handleListenClick}><span className="icon">play_arrow</span> Listen</button>
@@ -343,8 +376,21 @@ export default function ExerciseCard() {
               <>
                 <FeedbackHUD score={currentPrompt.score} pronunciationScore={currentPrompt.pronunciationScore} xpGained={currentPrompt.xpGained} streak={currentStreak} />
                 <p className="feedback-text">{currentPrompt.feedback}</p>
+                <div className="transcript" style={{marginTop: '16px'}}>
+                    <h3>Your Answer</h3>
+                    <p>"{currentPrompt.userTranscript}"</p>
+                </div>
                  {currentPrompt.userRecordingBase64 && (
-                  <UserAudioPlayer audioBase64={currentPrompt.userRecordingBase64} audioMimeType={currentPrompt.userRecordingMimeType} />
+                  <div className="audio-comparison-section">
+                    <div className="audio-player">
+                      <p>Original Prompt</p>
+                      <button className="button" onClick={handleListenClick}><span className="icon">play_arrow</span> Listen</button>
+                    </div>
+                    <div className="audio-player">
+                      <p>Your Recording</p>
+                      <UserAudioPlayer audioBase64={currentPrompt.userRecordingBase64} audioMimeType={currentPrompt.userRecordingMimeType} />
+                    </div>
+                  </div>
                 )}
                 {currentLesson.lessonType === 'sentence_ordering' && currentPrompt.score < 100 && (
                   <div className="correct-answer-display">

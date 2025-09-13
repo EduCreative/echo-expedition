@@ -1,5 +1,3 @@
-
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -35,13 +33,24 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
     e.stopPropagation();
     const audio = audioRef.current;
     if (!audio || !audioSrc) return;
+  
     if (isPlaying) {
       audio.pause();
+      setIsPlaying(false);
     } else {
-      if (audio.ended) audio.currentTime = 0;
-      audio.play();
+      if (audio.ended) {
+        audio.currentTime = 0;
+      }
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => setIsPlaying(true))
+          .catch(error => {
+            console.error("Audio playback failed:", error);
+            setIsPlaying(false);
+          });
+      }
     }
-    setIsPlaying(!isPlaying);
   };
   
   if (!audioSrc) return null;

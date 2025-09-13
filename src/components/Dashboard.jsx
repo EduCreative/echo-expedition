@@ -158,17 +158,22 @@ function CustomLessonCreator() {
 
 function UserProfileSummary({ user }) {
   if (!user) return null;
-  const xpForNextLevel = user.level * XP_PER_LEVEL;
-  const xpPercentage = (user.xp / xpForNextLevel) * 100;
+  
+  // FIX: Use default values to prevent NaN if user.level or user.xp are not yet loaded.
+  const currentLevel = user.level || 1;
+  const currentXp = user.xp || 0;
+
+  const xpForNextLevel = currentLevel * XP_PER_LEVEL;
+  const xpPercentage = (currentXp / xpForNextLevel) * 100;
 
   return (
     <div className="user-profile-summary">
-      <div className="level-badge">LVL {user.level}</div>
+      <div className="level-badge">LVL {currentLevel}</div>
       <div className="xp-details">
         <div className="xp-bar">
           <div className="xp-bar-inner" style={{ width: `${xpPercentage}%` }}></div>
         </div>
-        <div className="xp-text">{user.xp} / {xpForNextLevel} XP</div>
+        <div className="xp-text">{currentXp} / {xpForNextLevel} XP</div>
       </div>
     </div>
   );
@@ -218,13 +223,15 @@ export default function Dashboard() {
 
   const { totalLessonsCompleted, totalXpEarned } = useMemo(() => {
     if (!user) return { totalLessonsCompleted: 0, totalXpEarned: 0 };
+    
     const lessonsCompleted = Object.values(progress).reduce(
       (acc, levelProgress) => acc + Object.keys(levelProgress).length,
       0
     );
 
-    const xpFromLevels = (user.level - 1) * XP_PER_LEVEL;
-    const totalXp = xpFromLevels + user.xp;
+    // FIX: Use default values for level and XP to prevent NaN calculations.
+    const xpFromLevels = ((user.level || 1) - 1) * XP_PER_LEVEL;
+    const totalXp = xpFromLevels + (user.xp || 0);
 
     return { totalLessonsCompleted: lessonsCompleted, totalXpEarned: totalXp };
   }, [progress, user]);

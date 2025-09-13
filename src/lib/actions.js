@@ -5,7 +5,7 @@
 import useStore, { initialSessionState } from './store';
 import { auth, db, googleProvider } from './firebase';
 import {
-  signInWithRedirect,
+  signInWithPopup,
   signOut,
 } from 'firebase/auth';
 import { doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
@@ -88,10 +88,24 @@ export const startPracticeMode = () => useStore.setState({ view: 'practice_selec
 export const signInWithGoogle = async () => {
   useStore.setState({ isProcessing: true, error: null });
   try {
-    await signInWithRedirect(auth, googleProvider);
+    const result = await signInWithPopup(auth, googleProvider);
+    // The onAuthStateChanged listener in App.jsx will handle all user state updates.
+    // We can add a welcome toast here for immediate feedback after the popup closes.
+    if (result.user) {
+        addToast({
+            title: `Welcome, ${result.user.displayName}!`,
+            message: 'You have been successfully signed in.',
+            icon: 'login',
+        });
+    }
   } catch (error) {
     console.error("Google sign-in failed:", error);
-    useStore.setState({ isProcessing: false, error: 'Could not sign in with Google.' });
+    // Handle common errors gracefully
+    if (error.code === 'auth/popup-closed-by-user') {
+      useStore.setState({ isProcessing: false, error: null }); // Not really an error
+    } else {
+      useStore.setState({ isProcessing: false, error: 'Could not sign in with Google.' });
+    }
   }
 };
 
@@ -235,7 +249,7 @@ export const startLesson = (levelId, lessonIndex) => {
       lessonId: lessonIndex,
       title: lessonInfo.title,
       lessonType: lessonInfo.type,
-      prompts: lessonData.prompts.map(p => ({ ...p, userTranscript: null, feedback: null, score: null, xpGained: 0 })),
+      prompts: lessonData.prompts.map(p => ({ ...p, userTranscript: null, feedback: null, score: null, xpGained: 0, pendingRecording: null })),
       currentPromptIndex: 0,
       ...(lessonData.story && { story: lessonData.story }),
     };
@@ -306,7 +320,7 @@ export const startCustomLesson = async (topic) => {
       lessonId: topic,
       title: `Custom: ${topic}`,
       lessonType: 'sentence',
-      prompts: parsed.prompts.map(p => ({ ...p, userTranscript: null, feedback: null, score: null, xpGained: 0 })),
+      prompts: parsed.prompts.map(p => ({ ...p, userTranscript: null, feedback: null, score: null, xpGained: 0, pendingRecording: null })),
       currentPromptIndex: 0,
     };
     setCachedCustomLesson(topic, newLesson);
@@ -472,7 +486,7 @@ export const toggleVoiceCommands = () => {
 
 
 // --- Audio Recording & AI Processing ---
-// This section is complex and requires careful state management.
+const STREAK_THRESHOLD = 70; // Score needed to continue a streak in a lesson
 let recognition;
 let mediaRecorder;
 let audioChunks = [];
@@ -490,14 +504,173 @@ const processUserResponse = async (transcript, audioBase64, mimeType) => {
             await processRaceFeedback(transcript, audioBase64, mimeType);
             break;
         case 'conversation':
-            // Logic for conversation will be here...
+            await processConversationResponse(transcript, audioBase64, mimeType);
             break;
     }
     useStore.setState({ isProcessing: false });
 };
 
+export const submitForFeedback = () => {
+  const { currentLesson } = useStore.getState();
+  if (!currentLesson) return;
+
+  const promptIndex = currentLesson.currentPromptIndex;
+  const prompt = currentLesson.prompts[promptIndex];
+  const { pendingRecording } = prompt;
+
+  if (pendingRecording) {
+    useStore.setState({ isProcessing: true });
+    processUserResponse(pendingRecording.transcript, pendingRecording.audioBase64, pendingRecording.audioMimeType);
+  }
+};
+
+export const discardRecording = () => {
+  const { currentLesson } = useStore.getState();
+  if (!currentLesson) return;
+  
+  const promptIndex = currentLesson.currentPromptIndex;
+  useStore.setState(s => {
+    if(s.currentLesson.prompts[promptIndex]) {
+      s.currentLesson.prompts[promptIndex].pendingRecording = null;
+    }
+  });
+};
+
+const processConversationResponse = async (transcript, audioBase64, mimeType) => {
+    const { conversationState } = useStore.getState();
+
+    useStore.setState(s => {
+        s.conversationState.chatHistory.push({ role: 'user', text: transcript, audioBase64, audioMimeType: mimeType });
+    });
+
+    try {
+        const history = conversationState.chatHistory.map(m => ({
+            role: m.role === 'ai' ? 'model' : 'user',
+            parts: [{ text: m.text }]
+        }));
+
+        const chat = ai.chats.create({ model, history: history.slice(0, -1) });
+        const result = await chat.sendMessage({ message: transcript });
+        const responseText = result.text.trim();
+        
+        useStore.setState(s => {
+            s.conversationState.chatHistory.push({ role: 'ai', text: responseText });
+        });
+    } catch (error) {
+        console.error("Error in conversation:", error);
+        addToast({ title: 'AI Error', message: 'Could not get a response.', icon: 'error' });
+        useStore.setState(s => {
+            s.conversationState.chatHistory.push({ role: 'ai', text: "Sorry, I encountered an error. Please try again." });
+        });
+    }
+};
+
 const processExerciseFeedback = async (transcript, audioBase64, mimeType) => {
-  // To be implemented
+  const state = useStore.getState();
+  const { currentLesson, user, isOnline, isAiEnabled } = state;
+  if (!currentLesson) return;
+
+  const isInteractive = ['roleplay', 'boss_battle'].includes(currentLesson.lessonType);
+  const isPractice = currentLesson.isPractice || currentLesson.levelId === 'custom';
+
+  if (isInteractive) {
+    if (!isOnline || !isAiEnabled) {
+      addToast({ title: 'Feature Unavailable', message: 'Interactive lessons require an internet connection and AI features.', icon: 'sync_disabled'});
+      return;
+    }
+    useStore.setState(s => { s.currentLesson.chatHistory.push({ role: 'user', text: transcript, audioBase64, audioMimeType: mimeType }); });
+    try {
+      const updatedHistory = useStore.getState().currentLesson.chatHistory;
+      const context = { scenario: currentLesson.scenario, lastAiMessage: updatedHistory[updatedHistory.length - 2].text };
+      const { prompt, schema } = getFeedbackPrompt(currentLesson.lessonType, context, transcript);
+      
+      const feedbackPromise = ai.models.generateContent({ model, contents: { parts: [{ text: prompt }, { inlineData: { mimeType, data: audioBase64 } }] }, config: { responseMimeType: "application/json", responseSchema: schema } });
+      const historyForChat = updatedHistory.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.text }] }));
+      const chat = ai.chats.create({ model, history: historyForChat.slice(0, -1) });
+      const responsePromise = chat.sendMessage({ message: transcript });
+      const [feedbackResult, responseResult] = await Promise.all([feedbackPromise, responsePromise]);
+
+      const feedbackData = JSON.parse(feedbackResult.text.trim());
+      const aiResponseText = responseResult.text.trim();
+      const averageScore = Math.round((feedbackData.score + feedbackData.pronunciationScore) / 2);
+      const xpGained = averageScore >= 50 ? Math.round(averageScore / 10) : 0;
+      
+      useStore.setState(s => {
+        s.currentLesson.chatHistory.push({ role: 'ai', text: aiResponseText });
+        s.currentLesson.prompt = { ...s.currentLesson.prompt, userTranscript: transcript, ...feedbackData, xpGained };
+        if (s.user && !isPractice) s.user.xp += xpGained;
+        if (!isPractice) {
+          const { levelId, lessonId } = currentLesson;
+          if (!s.progress[levelId]) s.progress[levelId] = {};
+          s.progress[levelId][lessonId] = averageScore;
+          s.justCompleted = { levelId, lessonId };
+        }
+      });
+      addToast({ title: 'Challenge Complete!', message: `You scored ${averageScore}.`, icon: 'military_tech' });
+      useStore.setState({ congratsAnimation: { show: true, text: 'Challenge Complete!' } });
+    } catch (error) {
+      console.error("Error in interactive lesson:", error);
+      addToast({ title: 'AI Error', message: 'Could not get a response.', icon: 'error' });
+      useStore.setState(s => { s.currentLesson.chatHistory.push({ role: 'ai', text: "Sorry, an AI error occurred." }); });
+    }
+  } else {
+    const promptIndex = currentLesson.currentPromptIndex;
+    const currentPrompt = currentLesson.prompts[promptIndex];
+    if (!isOnline || !isAiEnabled) {
+      useStore.setState(s => { s.currentLesson.prompts[promptIndex] = { ...currentPrompt, userTranscript: transcript, userRecordingBase64: audioBase64, userRecordingMimeType: mimeType, feedback: 'OFFLINE_RECORDING' }; });
+      addToast({ title: 'Recording Saved', message: 'AI feedback is unavailable.', icon: isOnline ? 'toggle_off' : 'wifi_off' });
+      return;
+    }
+    try {
+      let context;
+      switch (currentLesson.lessonType) {
+        case 'sentence_ordering': context = { jumbledText: currentPrompt.jumbledText, correctText: currentPrompt.correctText }; break;
+        case 'fill_in_the_blank': context = { promptText: currentPrompt.text, correctText: currentPrompt.correctText }; break;
+        case 'comprehension': context = { story: currentLesson.story, question: currentPrompt.question, correctAnswer: currentPrompt.correctAnswer }; break;
+        default: context = { promptText: currentPrompt.text, levelId: currentLesson.levelId }; break;
+      }
+      const { prompt, schema } = getFeedbackPrompt(currentLesson.lessonType, context, transcript);
+      const result = await ai.models.generateContent({ model, contents: { parts: [{ text: prompt }, { inlineData: { mimeType, data: audioBase64 } }] }, config: { responseMimeType: "application/json", responseSchema: schema }});
+      const feedbackData = JSON.parse(result.text.trim());
+      const averageScore = Math.round((feedbackData.score + feedbackData.pronunciationScore) / 2);
+      const xpGained = averageScore >= 50 ? Math.round(averageScore / 10) : 0;
+      useStore.setState(s => {
+        s.currentLesson.prompts[promptIndex] = { ...currentPrompt, userTranscript: transcript, userRecordingBase64: audioBase64, userRecordingMimeType: mimeType, ...feedbackData, xpGained, pendingRecording: null };
+        if (averageScore >= STREAK_THRESHOLD) s.currentStreak++; else s.currentStreak = 0;
+        if (!isPractice && s.user) {
+          s.user.xp += xpGained;
+          const { levelId, lessonId } = currentLesson;
+          if (!s.progress[levelId]) s.progress[levelId] = {};
+          if (!s.progress[levelId][lessonId]) s.progress[levelId][lessonId] = {};
+          s.progress[levelId][lessonId][promptIndex] = Math.max(s.progress[levelId][lessonId][promptIndex] || 0, averageScore);
+        }
+      });
+      const allPromptsDone = useStore.getState().currentLesson.prompts.every(p => p.feedback);
+      if (allPromptsDone && !isPractice) {
+        const { prompts } = useStore.getState().currentLesson;
+        const totalScore = prompts.reduce((sum, p) => sum + Math.round((p.score + p.pronunciationScore) / 2), 0);
+        const lessonAverage = Math.round(totalScore / prompts.length);
+        useStore.setState(s => {
+          const { levelId, lessonId } = currentLesson;
+          s.progress[levelId][lessonId] = lessonAverage;
+          s.justCompleted = { levelId, lessonId };
+        });
+        addToast({ title: 'Lesson Complete!', message: `Average score: ${lessonAverage}.`, icon: 'military_tech' });
+        useStore.setState({ congratsAnimation: { show: true, text: 'Lesson Complete!' } });
+      }
+    } catch (error) {
+       console.error("Error getting exercise feedback:", error);
+       addToast({ title: 'AI Error', message: 'Could not get feedback.', icon: 'error' });
+       useStore.setState(s => { s.currentLesson.prompts[promptIndex].feedback = 'AI_ERROR'; });
+    }
+  }
+
+  if (!isPractice && user && !user.isAnonymous) {
+      const { progress, user: updatedUser } = useStore.getState();
+      const progressRef = doc(db, "progress", user.uid);
+      await updateDoc(progressRef, { progress, 'user.xp': updatedUser.xp }).catch(err => console.error("Failed to save progress:", err));
+  }
+  checkAndAwardAchievements();
 };
 
 const processRaceFeedback = async (transcript, audioBase64, mimeType) => {
@@ -567,7 +740,28 @@ const handleRecordingStop = () => {
     reader.readAsDataURL(audioBlob);
     reader.onloadend = () => {
         const base64Audio = reader.result.split(',')[1];
-        processUserResponse(recordedTranscript, base64Audio, audioMimeType);
+        const state = useStore.getState();
+        const { view, currentLesson } = state;
+
+        // For standard lessons, create a pending recording for preview.
+        // For all other modes, process immediately to maintain conversational flow.
+        const isStandardLesson = view === 'exercise' && currentLesson && !['roleplay', 'boss_battle'].includes(currentLesson.lessonType);
+        
+        if (isStandardLesson) {
+            const promptIndex = currentLesson.currentPromptIndex;
+            useStore.setState(s => {
+                s.currentLesson.prompts[promptIndex].pendingRecording = {
+                    audioBase64: base64Audio,
+                    audioMimeType: audioMimeType,
+                    transcript: recordedTranscript,
+                };
+            });
+            // Stop the processing spinner, as we're now in preview mode.
+            useStore.setState({ isProcessing: false });
+        } else {
+            // For race, conversation, roleplay, etc., process immediately.
+            processUserResponse(recordedTranscript, base64Audio, audioMimeType);
+        }
     };
 };
 

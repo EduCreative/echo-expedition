@@ -49,16 +49,24 @@ function UserAudioPlayer({ audioBase64, audioMimeType }) {
     e.stopPropagation();
     const audio = audioRef.current;
     if (!audio || !audioSrc) return;
-
+  
     if (isPlaying) {
       audio.pause();
+      setIsPlaying(false);
     } else {
       if (audio.ended) {
-          audio.currentTime = 0;
+        audio.currentTime = 0;
       }
-      audio.play();
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => setIsPlaying(true))
+          .catch(error => {
+            console.error("Audio playback failed:", error);
+            setIsPlaying(false);
+          });
+      }
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleSeek = (e) => {

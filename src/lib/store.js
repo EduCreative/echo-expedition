@@ -23,8 +23,8 @@ export const initialSessionState = {
   isOnline: navigator.onLine,
   isSyncing: false, // Retained for visual feedback, though Firestore handles sync
   canInstall: false, // Replaces installPromptEvent to prevent circular JSON errors
-  speechSettings: { voice: null, rate: 1, autoPlayPrompts: false, showPhonetics: false },
-  isAiEnabled: true, // New state to control AI features
+  speechSettings: { voice: null, rate: 1, autoPlayPrompts: true, showPhonetics: true },
+  isAiEnabled: false, // Default to disabled as per user request
   isRecording: false,
   isProcessing: false,
   isAuthenticating: true, // Show loading screen on initial load while checking auth status
@@ -59,13 +59,8 @@ const useStore = create(
 
     // Updates the session state with data from Firestore
     updateProgressFromSnapshot: (progressData) => set(state => {
-      // To prevent "circular structure to JSON" errors, we must manually create
-      // new, "clean" objects by copying only the data we need from the Firestore
-      // `doc.data()` result. This breaks any potential circular references
-      // maintained by the Firestore SDK internally.
-      
       if (progressData) {
-        // Deep-copy the progress object (2 levels deep is sufficient for its structure)
+        // Deep-copy the progress object
         const newProgress = {};
         if (progressData.progress) {
           for (const levelId in progressData.progress) {
@@ -76,19 +71,14 @@ const useStore = create(
         }
         state.progress = newProgress;
 
-        // Copy achievements array
         state.achievements = progressData.achievements ? [...progressData.achievements] : [];
-        
-        // Copy high scores
         state.pronunciationRaceHighScore = progressData.pronunciationRaceHighScore || 0;
         state.listeningDrillHighScore = progressData.listeningDrillHighScore || 0;
 
-        // Safely copy and process dailyStreak
         if (progressData.dailyStreak) {
           const lastUpdated = progressData.dailyStreak.lastUpdated;
           state.dailyStreak = {
             count: progressData.dailyStreak.count || 0,
-            // Safely serialize Firestore Timestamps to prevent circular reference errors.
             lastUpdated: (lastUpdated && typeof lastUpdated.toDate === 'function')
               ? lastUpdated.toDate().toISOString()
               : lastUpdated,
@@ -96,12 +86,14 @@ const useStore = create(
         } else {
           state.dailyStreak = { count: 0, lastUpdated: null };
         }
+      }
 
-        // Merge user XP and level data
-        if (state.user && progressData.user) {
-          state.user.xp = progressData.user.xp || 0;
-          state.user.level = progressData.user.level || 1;
-        }
+      // FIX: Robustly initialize user XP and level to prevent NaN errors.
+      // This ensures that even if `progressData.user` is missing from Firestore,
+      // the user object in the state will have valid default values.
+      if (state.user) {
+        state.user.xp = progressData?.user?.xp || 0;
+        state.user.level = progressData?.user?.level || 1;
       }
     }),
 

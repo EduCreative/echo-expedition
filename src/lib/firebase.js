@@ -16,7 +16,6 @@ import { initializeFirestore, persistentLocalCache } from 'firebase/firestore';
 // in the Firebase Console.
 // Go to: Authentication > Settings > Authorized domains > Add domain
 // Failure to do this will result in "auth/unauthorized-domain" errors.
-
 const firebaseConfig = {
   apiKey: "AIzaSyBTTRyCxHOgrN6SSFMN9yzOeOf379gtspk",
   authDomain: "echo-expedition.firebaseapp.com",
