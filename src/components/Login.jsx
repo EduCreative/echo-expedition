@@ -33,7 +33,9 @@ export default function Login() {
           
           {/* --- REMOVE FOR PRODUCTION --- */}
           {/* This is a temporary button for development to bypass authentication. */}
-          <button
+          
+          
+          {/* <button
             className="button"
             onClick={signInAsAdmin_DEV}
             disabled={isProcessing}
@@ -42,6 +44,8 @@ export default function Login() {
             <span className="icon">engineering</span>
             Enter as Admin (Dev Only)
           </button>
+           */}
+          
           {/* --- END REMOVE FOR PRODUCTION --- */}
 
         </div>
