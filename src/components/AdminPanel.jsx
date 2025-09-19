@@ -47,9 +47,6 @@ function AdminAnalytics({ users }) {
       }]
     };
 
-    // Lessons Distribution Data is no longer easily calculable here, would require fetching all progress docs.
-    // For simplicity, we will remove this chart.
-
     // User Status Data
     const statusCounts = users.reduce((acc, user) => {
       const status = user.status || 'active';
@@ -66,8 +63,29 @@ function AdminAnalytics({ users }) {
         borderWidth: 1,
       }]
     };
+    
+    // User Level Distribution Data
+    const levelCounts = users.reduce((acc, user) => {
+      const level = user.level || 1;
+      acc[level] = (acc[level] || 0) + 1;
+      return acc;
+    }, {});
+    const maxLevel = Object.keys(levelCounts).length > 0 ? Math.max(...Object.keys(levelCounts).map(Number)) : 1;
+    const levelLabels = Array.from({ length: maxLevel }, (_, i) => `Level ${i + 1}`);
+    const levelDataPoints = Array.from({ length: maxLevel }, (_, i) => levelCounts[i + 1] || 0);
 
-    return { registrationsData, statusData };
+    const levelDistributionData = {
+        labels: levelLabels,
+        datasets: [{
+            label: 'Number of Users',
+            data: levelDataPoints,
+            backgroundColor: 'rgba(251, 188, 4, 0.7)', // --warning
+            borderColor: 'rgb(251, 188, 4)',
+            borderWidth: 1,
+        }]
+    };
+
+    return { registrationsData, statusData, levelDistributionData };
   }, [users]);
 
   const getCommonOptions = (title) => ({
@@ -87,7 +105,7 @@ function AdminAnalytics({ users }) {
     },
     scales: {
       y: {
-        ticks: { color: textColor },
+        ticks: { color: textColor, precision: 0 },
         grid: { color: gridColor },
       },
       x: {
@@ -103,6 +121,9 @@ function AdminAnalytics({ users }) {
         <div className="admin-charts-grid">
             <div className="chart-container-wrapper">
                 <Line options={getCommonOptions('User Registrations (Last 12 Months)')} data={chartData.registrationsData} />
+            </div>
+             <div className="chart-container-wrapper">
+                <Bar options={getCommonOptions('User Level Distribution')} data={chartData.levelDistributionData} />
             </div>
             <div className="chart-container-wrapper">
                 <Doughnut options={{...getCommonOptions('User Status'), scales: {}}} data={chartData.statusData} />
@@ -147,7 +168,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     refreshUsers();
-  }, [isOnline]);
+  }, []);
 
   const filteredUsers = useMemo(() => {
     const lowercasedFilter = searchTerm.toLowerCase();
@@ -187,6 +208,9 @@ export default function AdminPanel() {
             <tr>
               <th>Name</th>
               <th>Email</th>
+              <th>Level</th>
+              <th>XP</th>
+              <th>Race High Score</th>
               <th>Registered</th>
               <th>Last Login</th>
               <th>Status</th>
@@ -198,6 +222,9 @@ export default function AdminPanel() {
               <tr key={u.id}>
                 <td>{u.name || 'Anonymous'}</td>
                 <td>{u.email || 'N/A'}</td>
+                <td>{u.level || 1}</td>
+                <td>{u.xp || 0}</td>
+                <td>{u.pronunciationRaceHighScore || 0}</td>
                 <td>{formatDate(u.registrationDate)}</td>
                 <td>{formatDate(u.lastLogin)}</td>
                 <td>

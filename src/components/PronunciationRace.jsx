@@ -6,65 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import useStore from '../lib/store';
 import { goToDashboard, startRecording, stopRecording, startPronunciationRace, goToNextRaceWord } from '../lib/actions';
 import c from 'clsx';
-
-// This component needs to be self-contained for PronunciationRace
-function UserAudioPlayer({ audioBase64, audioMimeType }) {
-  const audioRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [audioSrc, setAudioSrc] = useState('');
-
-  useEffect(() => {
-    if (audioBase64 && audioMimeType) {
-      setAudioSrc(`data:${audioMimeType};base64,${audioBase64}`);
-    } else {
-      setAudioSrc('');
-    }
-  }, [audioBase64, audioMimeType]);
-  
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onEnded = () => setIsPlaying(false);
-    audio.addEventListener('ended', onEnded);
-    return () => audio.removeEventListener('ended', onEnded);
-  }, [audioSrc]);
-
-  const togglePlayPause = (e) => {
-    e.stopPropagation();
-    const audio = audioRef.current;
-    if (!audio || !audioSrc) return;
-  
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      if (audio.ended) {
-        audio.currentTime = 0;
-      }
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => setIsPlaying(true))
-          .catch(error => {
-            console.error("Audio playback failed:", error);
-            setIsPlaying(false);
-          });
-      }
-    }
-  };
-  
-  if (!audioSrc) return null;
-  return (
-    <div className="user-audio-player" style={{padding: '4px 12px'}}>
-      <audio ref={audioRef} src={audioSrc} preload="metadata"></audio>
-      <button onClick={togglePlayPause} className="icon-button play-pause-button" aria-label={isPlaying ? "Pause audio" : "Play audio"}>
-        <span className="icon">{isPlaying ? 'pause' : 'play_arrow'}</span>
-      </button>
-      <p style={{flexGrow: 1, textAlign: 'left', marginLeft: '8px', fontSize: '14px', color: 'var(--text-secondary)'}}>Your Recording</p>
-    </div>
-  );
-}
-
+import UserAudioPlayer from './UserAudioPlayer';
 
 function RaceEndSummary({ score, highScore }) {
   return (

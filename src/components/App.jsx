@@ -18,6 +18,7 @@ import {
   changePrompt,
   speakText,
   startPracticeLesson,
+  startLesson,
 } from '../lib/actions';
 import PronunciationRace from './PronunciationRace';
 import ListeningDrill from './ListeningDrill';
@@ -28,13 +29,59 @@ import Leaderboard from './Leaderboard';
 import c from 'clsx';
 import { levels } from '../lib/prompts';
 import { auth, db } from '../lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut, getRedirectResult } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import GraffitiCongrats from './GraffitiCongrats';
 import Onboarding from './Onboarding';
+import InteractiveBackground from './InteractiveBackground';
+import AdBanner from './AdBanner';
 
 // Keep a module-level reference to the recognition instance to persist it across re-renders
 let commandRecognition;
+
+/**
+ * Determines the user's next lesson based on their progress.
+ * It finds the first lesson in the first unlocked level that hasn't been completed.
+ * @returns {{levelId: string, lessonIndex: number} | null} The next lesson, or null if all are complete.
+ */
+const findNextLesson = () => {
+  const { progress } = useStore.getState();
+  const SCORE_UNLOCK_THRESHOLD = 70;
+  const levelEntries = Object.entries(levels);
+
+  for (let i = 0; i < levelEntries.length; i++) {
+    const [levelId, levelData] = levelEntries[i];
+    
+    let isUnlocked = false;
+    if (i === 0) {
+      isUnlocked = true;
+    } else {
+      const prevLevelId = levelEntries[i - 1][0];
+      const prevLevelProgress = progress[prevLevelId] || {};
+      const completedLessonsScores = Object.values(prevLevelProgress);
+      if (completedLessonsScores.length > 0) {
+        const sumOfScores = completedLessonsScores.reduce((sum, score) => sum + (score || 0), 0);
+        const prevLevelAverageScore = sumOfScores / completedLessonsScores.length;
+        if (prevLevelAverageScore >= SCORE_UNLOCK_THRESHOLD) {
+          isUnlocked = true;
+        }
+      }
+    }
+
+    if (isUnlocked) {
+      const levelProgress = progress[levelId] || {};
+      for (let j = 0; j < levelData.lessons.length; j++) {
+        if (levelProgress[j] === undefined) {
+          return { levelId, lessonIndex: j }; // Found the next lesson
+        }
+      }
+    } else {
+      return null; // Next level is locked, so stop searching
+    }
+  }
+  return null; // All lessons completed
+};
+
 
 function PracticeSelection() {
   const [levelId, setLevelId] = useState('');
@@ -122,13 +169,31 @@ export default function App() {
   const toggleThemeRef = useRef();
   const isCommandRecognitionActive = useRef(false);
   const shouldRestartRecognition = useRef(true);
+  const justLoggedInRef = useRef(false);
   
   // --- Firebase Auth State Listener ---
-  // This hook handles all authentication logic.
   useEffect(() => {
-    // The onAuthStateChanged listener is the single source of truth for auth state.
-    // It will fire when the app loads, and anytime the user signs in or out.
-    // This is sufficient for both initial auth check and handling popup sign-ins.
+    // Check for redirect result first. This captures the user info if they
+    // just signed in via the redirect flow.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result && result.user) {
+          // This confirms the user has just signed in.
+          justLoggedInRef.current = true;
+          const welcomeMessage = `Welcome, ${result.user.displayName}!`;
+          addToast({
+              title: welcomeMessage,
+              message: 'Taking you to your next lesson.',
+              icon: 'login',
+          });
+          speakText(`${welcomeMessage}. Let's start your next lesson.`);
+        }
+      })
+      .catch((error) => {
+        console.error("Error getting redirect result:", error);
+        addToast({ title: 'Sign-in Error', message: 'There was an issue completing your sign-in.', icon: 'error' });
+      });
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       unsubscribeProgressRef.current();
 
@@ -153,8 +218,8 @@ export default function App() {
               name: firebaseUser.displayName || 'Guest User',
               email: firebaseUser.email,
               picture: firebaseUser.photoURL,
-              registrationDate: new Date().toISOString(),
-              lastLogin: new Date().toISOString(),
+              registrationDate: new Date(),
+              lastLogin: new Date(),
               status: 'active',
               hasOnboarded: false,
             };
@@ -172,17 +237,29 @@ export default function App() {
             updateProgressFromSnapshot(progressData);
             useStore.setState({ showOnboarding: true });
           } else {
-            const progressDoc = await getDoc(progressRef);
-            if (progressDoc.exists()) {
-              updateProgressFromSnapshot(progressDoc.data());
-            }
-            await setDoc(userRef, { lastLogin: new Date().toISOString() }, { merge: true });
-            useStore.setState({ showOnboarding: !userDoc.data().hasOnboarded });
+            await setDoc(userRef, { lastLogin: new Date() }, { merge: true });
+            const hasOnboarded = userDoc.data().hasOnboarded;
+            useStore.setState({ showOnboarding: !hasOnboarded });
           }
-
+          
+          let isFirstSnapshot = true;
           unsubscribeProgressRef.current = onSnapshot(progressRef, (snapshot) => {
             if (snapshot.exists()) {
               updateProgressFromSnapshot(snapshot.data());
+
+              // On the first data load after a fresh login, navigate to the next lesson.
+              if (justLoggedInRef.current && isFirstSnapshot) {
+                isFirstSnapshot = false; 
+                justLoggedInRef.current = false; // Reset flag
+                
+                const hasOnboarded = !useStore.getState().showOnboarding;
+                if(hasOnboarded) {
+                    const nextLesson = findNextLesson();
+                    if (nextLesson) {
+                        startLesson(nextLesson.levelId, nextLesson.lessonIndex);
+                    }
+                }
+              }
             }
           }, (error) => {
               console.error("Firestore snapshot error:", error);
@@ -190,12 +267,7 @@ export default function App() {
           });
 
         } else {
-          const { user: localUser } = useStore.getState();
-          if (localUser && (localUser.isAnonymous || localUser.isDevAdmin)) {
-            // A local session is active, don't clear it.
-          } else {
-            clearUserSession();
-          }
+          clearUserSession();
         }
       } catch (error) {
         console.error("Critical error during user session initialization:", error);
@@ -243,10 +315,42 @@ export default function App() {
     };
     window.addEventListener('beforeinstallprompt', handleInstallPrompt);
 
+    // --- PWA Update Listeners ---
+    const handleNewSW = () => {
+      navigator.serviceWorker.getRegistration().then(reg => {
+        if (reg?.waiting) {
+          addToast({
+            title: 'Update Available',
+            message: 'A new version of the app is ready.',
+            icon: 'system_update',
+            duration: 120000, // Stay for 2 minutes or until actioned
+            action: {
+              label: 'Refresh',
+              onClick: () => {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+              },
+            },
+          });
+        }
+      });
+    };
+    
+    let refreshing;
+    const handleControllerChange = () => {
+      if (refreshing) return;
+      window.location.reload();
+      refreshing = true;
+    };
+    
+    window.addEventListener('new-sw-installed', handleNewSW);
+    navigator.serviceWorker?.addEventListener('controllerchange', handleControllerChange);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('beforeinstallprompt', handleInstallPrompt);
+      window.removeEventListener('new-sw-installed', handleNewSW);
+      navigator.serviceWorker?.removeEventListener('controllerchange', handleControllerChange);
     };
   }, []);
   
@@ -425,6 +529,7 @@ export default function App() {
 
   return (
     <div className="app-container">
+      <InteractiveBackground />
       {showOnboarding && <Onboarding />}
       <Header isDark={isDark} toggleTheme={() => setIsDark(p => !p)} />
       <main>
@@ -437,6 +542,7 @@ export default function App() {
           onClose={handleCongratsClose}
         />
       )}
+      <AdBanner />
       <Footer />
     </div>
   );

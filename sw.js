@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-const STATIC_CACHE_NAME = 'echo-expedition-static-v1.3'; // For app shell, assets, etc.
+const STATIC_CACHE_NAME = 'echo-expedition-static-v1.4'; // Incremented version
 const ALL_CACHES = [
   STATIC_CACHE_NAME,
 ];
@@ -17,8 +17,15 @@ const APP_SHELL_URLS = [
 
 // --- SERVICE WORKER LIFECYCLE ---
 
+// Listen for a message from the client to skip waiting and activate the new SW
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('install', event => {
-  self.skipWaiting();
+  // Do not skip waiting here anymore. We want to wait for the user's prompt.
   event.waitUntil(
     caches.open(STATIC_CACHE_NAME).then(cache => {
       console.log('Opened static cache, caching app shell.');
@@ -39,7 +46,7 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => self.clients.claim()) // Take control of uncontrolled clients
   );
 });
 
@@ -59,23 +66,29 @@ self.addEventListener('fetch', event => {
     return; // Let the browser handle it.
   }
   
-  // Strategy: Cache First, falling back to Network for all assets.
-  event.respondWith(
-    caches.open(STATIC_CACHE_NAME).then(cache => {
-      return cache.match(request).then(cachedResponse => {
-        // Return from cache if found.
-        if (cachedResponse) {
-          return cachedResponse;
-        }
+  // Strategy: Network first, then cache for navigation requests (the HTML page).
+  // This is crucial for detecting new versions of the app.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(() => {
+        // If the network fails, serve the cached page.
+        return caches.match(request);
+      })
+    );
+    return;
+  }
 
-        // Otherwise, fetch from the network.
-        return fetch(request).then(networkResponse => {
-          // Cache the new response for future use.
-          if (networkResponse.ok && request.url.startsWith('http')) {
-            cache.put(request, networkResponse.clone());
-          }
-          return networkResponse;
-        });
+  // Strategy: Cache first, then network for all other assets (JS, CSS, images, etc.).
+  event.respondWith(
+    caches.match(request).then(cachedResponse => {
+      return cachedResponse || fetch(request).then(networkResponse => {
+        if (networkResponse && networkResponse.status === 200 && request.url.startsWith('http')) {
+          const responseToCache = networkResponse.clone();
+          caches.open(STATIC_CACHE_NAME).then(cache => {
+            cache.put(request, responseToCache);
+          });
+        }
+        return networkResponse;
       });
     })
   );

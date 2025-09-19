@@ -5,8 +5,11 @@
 import useStore, { initialSessionState } from './store';
 import { auth, db, googleProvider } from './firebase';
 import {
-  signInWithPopup,
+  signInWithRedirect,
   signOut,
+  setPersistence,
+  browserSessionPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth';
 import { doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -42,6 +45,7 @@ const checkAndAwardAchievements = () => {
       message: firstNew.name,
       icon: firstNew.icon,
     });
+    speakText(`Achievement Unlocked! ${firstNew.name}.`);
     
     // Persist to Firebase
     if (state.user && !state.user.isAnonymous) {
@@ -52,6 +56,69 @@ const checkAndAwardAchievements = () => {
     }
   }
 };
+
+// Helper function to check if two dates are on the same day (ignores time)
+const isSameDay = (d1, d2) => {
+  if (!d1 || !d2) return false;
+  return d1.getFullYear() === d2.getFullYear() &&
+         d1.getMonth() === d2.getMonth() &&
+         d1.getDate() === d2.getDate();
+};
+
+// Helper function to check if a date is yesterday relative to today
+const isYesterday = (date) => {
+  if (!date) return false;
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  return isSameDay(date, yesterday);
+};
+
+export const checkAndUpdateStreak = () => {
+  const { dailyStreak, user } = useStore.getState();
+  if (!user || user.isAnonymous) return; // Don't track streaks for guests
+
+  const today = new Date();
+  const lastUpdatedDate = dailyStreak.lastUpdated ? new Date(dailyStreak.lastUpdated) : null;
+
+  // No update needed if they've already completed a lesson today
+  if (lastUpdatedDate && isSameDay(lastUpdatedDate, today)) {
+    return;
+  }
+
+  let newStreak;
+
+  // If last update was yesterday, increment streak
+  if (lastUpdatedDate && isYesterday(lastUpdatedDate)) {
+    newStreak = {
+      count: dailyStreak.count + 1,
+      lastUpdated: today.toISOString(),
+    };
+    addToast({
+      title: `Streak Extended!`,
+      message: `You're on a ${newStreak.count}-day streak! Keep it up!`,
+      icon: 'local_fire_department',
+    });
+    speakText(`Streak extended! ${newStreak.count} days!`);
+  } else {
+    // If it was before yesterday or never, reset to 1
+    newStreak = {
+      count: 1,
+      lastUpdated: today.toISOString(),
+    };
+    // Only show the "reset" message if they had a streak to lose.
+    if (dailyStreak.count > 1) {
+       addToast({
+          title: 'Streak Reset',
+          message: `You've started a new 1-day streak!`,
+          icon: 'restart_alt',
+       });
+    }
+  }
+  
+  useStore.setState({ dailyStreak: newStreak });
+};
+
 
 // --- Toast & Navigation Actions ---
 
@@ -85,27 +152,18 @@ export const startPracticeMode = () => useStore.setState({ view: 'practice_selec
 
 // --- Authentication Actions ---
 
-export const signInWithGoogle = async () => {
+export const signInWithGoogle = async (rememberMe = true) => {
   useStore.setState({ isProcessing: true, error: null });
   try {
-    const result = await signInWithPopup(auth, googleProvider);
-    // The onAuthStateChanged listener in App.jsx will handle all user state updates.
-    // We can add a welcome toast here for immediate feedback after the popup closes.
-    if (result.user) {
-        addToast({
-            title: `Welcome, ${result.user.displayName}!`,
-            message: 'You have been successfully signed in.',
-            icon: 'login',
-        });
-    }
+    // Set the session persistence based on the user's choice.
+    // 'local' persists across sessions (browser close/reopen), 'session' does not.
+    const persistence = rememberMe ? browserLocalPersistence : browserSessionPersistence;
+    await setPersistence(auth, persistence);
+    
+    await signInWithRedirect(auth, googleProvider);
   } catch (error) {
-    console.error("Google sign-in failed:", error);
-    // Handle common errors gracefully
-    if (error.code === 'auth/popup-closed-by-user') {
-      useStore.setState({ isProcessing: false, error: null }); // Not really an error
-    } else {
-      useStore.setState({ isProcessing: false, error: 'Could not sign in with Google.' });
-    }
+    console.error("Google sign-in redirect failed to initiate:", error);
+    useStore.setState({ isProcessing: false, error: 'Could not start the sign-in process.' });
   }
 };
 
@@ -124,37 +182,27 @@ export const signInAsLocalGuest = () => {
   });
 };
 
-export const signInAsAdmin_DEV = () => {
-  console.warn("Using developer-only admin sign-in. DO NOT USE IN PRODUCTION.");
-  const adminUser = {
-    uid: 'ADMIN_DEV_ID',
-    displayName: 'Admin (Dev)',
-    email: 'kmasroor50@gmail.com',
-    isAnonymous: false,
-    isDevAdmin: true,
-  };
-  useStore.getState().setUser(adminUser);
-  useStore.setState({ view: 'admin' });
-};
-
 export const logout = async () => {
-  const { user } = useStore.getState();
+  if (window.confirm("Are you sure you want to log out?")) {
+    const { user } = useStore.getState();
 
-  // Handle all local users (guest, dev admin) by clearing local state directly.
-  if (user && (user.isAnonymous || user.isDevAdmin)) {
+    // First, sign out from Firebase if the user is not a local guest.
+    // This clears Firebase's session state (e.g., in IndexedDB).
+    // The onAuthStateChanged listener will also fire, but our manual
+    // session clear below ensures the UI updates immediately.
+    if (user && !user.isAnonymous) {
+      try {
+        await signOut(auth);
+      } catch (error) {
+        console.error("Error signing out from Firebase:", error);
+        // Still proceed to clear local state even if Firebase signout fails.
+      }
+    }
+
+    // Always clear the local session state for all user types (Firebase or guest).
+    // This provides immediate UI feedback by resetting the store.
     useStore.getState().clearUserSession();
     addToast({ title: 'Logged Out', message: 'You have been successfully signed out.', icon: 'logout' });
-  } else {
-    // For regular Firebase users, sign out via Firebase.
-    // The `onAuthStateChanged` listener in App.jsx will then handle clearing the session.
-    try {
-      await signOut(auth);
-      // The toast is here to provide immediate feedback. The session clear will happen moments later via the listener.
-      addToast({ title: 'Logged Out', message: 'You have been successfully signed out.', icon: 'logout' });
-    } catch (error) {
-      console.error("Error signing out: ", error);
-      addToast({ title: 'Logout Error', message: 'Could not log out.', icon: 'error' });
-    }
   }
 };
 
@@ -428,33 +476,89 @@ export const goToNextDrillSentence = () => {
     });
 };
 
+export const recordAgain = () => {
+    useStore.setState(s => {
+        if (!s.currentLesson || !s.currentLesson.prompts) return;
+        
+        const isInteractive = ['roleplay', 'boss_battle'].includes(s.currentLesson.lessonType);
+
+        if (isInteractive) {
+            // This is not implemented in the UI for interactive lessons, but as a safeguard...
+            const promptState = s.currentLesson.prompt;
+            Object.assign(promptState, {
+                userTranscript: null,
+                feedback: null,
+                score: null,
+                pronunciationScore: null,
+                xpGained: 0,
+            });
+        } else {
+            const index = s.currentLesson.currentPromptIndex;
+            const prompt = s.currentLesson.prompts[index];
+            // Reset all user-generated fields for the prompt
+            Object.assign(prompt, {
+                userTranscript: null,
+                feedback: null,
+                score: null,
+                pronunciationScore: null,
+                xpGained: 0,
+                pendingRecording: null,
+                userRecordingBase64: null,
+                userRecordingMimeType: null,
+            });
+        }
+    });
+};
+
 // --- Admin Actions ---
 export const fetchAllUsersForAdmin = async () => {
-  const usersSnapshot = await getDocs(collection(db, "users"));
+  // Fetch from both collections in parallel for efficiency
+  const [usersSnapshot, progressSnapshot] = await Promise.all([
+    getDocs(collection(db, "users")),
+    getDocs(collection(db, "progress"))
+  ]);
+
+  // Create a map of progress data for easy lookup
+  const progressData = new Map();
+  progressSnapshot.forEach(doc => {
+    progressData.set(doc.id, doc.data());
+  });
+  
+  // Map over users and combine with their progress
   return usersSnapshot.docs.map(doc => {
-    const data = doc.data();
-    // Helper to safely serialize Firestore Timestamps, which can cause circular reference errors.
+    const userData = doc.data();
+    // Using || {} as a fallback for users who might not have a progress document yet.
+    const userProgress = progressData.get(doc.id) || {};
+    
     const serializeTimestamp = (timestamp) => {
-        if (timestamp && typeof timestamp.toDate === 'function') {
-            return timestamp.toDate().toISOString();
-        }
-        return timestamp; // Return as is if it's already a string or null
+      if (timestamp && typeof timestamp.toDate === 'function') {
+        return timestamp.toDate().toISOString();
+      }
+      return timestamp;
     };
+
     return {
       id: doc.id,
-      name: data.name,
-      email: data.email,
-      registrationDate: serializeTimestamp(data.registrationDate),
-      lastLogin: serializeTimestamp(data.lastLogin),
-      status: data.status,
+      name: userData.name,
+      email: userData.email,
+      registrationDate: serializeTimestamp(userData.registrationDate),
+      lastLogin: serializeTimestamp(userData.lastLogin),
+      status: userData.status || 'active',
+      // Add new progress fields with defaults
+      level: userProgress.user?.level || 1,
+      xp: userProgress.user?.xp || 0,
+      pronunciationRaceHighScore: userProgress.pronunciationRaceHighScore || 0,
     };
   });
 };
 
 export const suspendUser = async (userId, currentStatus) => {
   const newStatus = currentStatus === 'active' ? 'suspended' : 'active';
-  await updateDoc(doc(db, "users", userId), { status: newStatus });
-  addToast({ title: 'User Updated', message: `User status set to ${newStatus}.`, icon: 'security' });
+  const actionVerb = newStatus === 'suspended' ? 'suspend' : 'reactivate';
+  if (window.confirm(`Are you sure you want to ${actionVerb} this user?`)) {
+    await updateDoc(doc(db, "users", userId), { status: newStatus });
+    addToast({ title: 'User Updated', message: `User status set to ${newStatus}.`, icon: 'security' });
+  }
 };
 
 export const resetUserProgress = async (userId, userName) => {
@@ -492,6 +596,22 @@ let mediaRecorder;
 let audioChunks = [];
 let audioMimeType;
 let recordedTranscript = '';
+
+// Helper function to find a browser-supported MIME type for audio recording.
+const getSupportedMimeType = () => {
+    const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+    ];
+    for (const mimeType of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+            return mimeType;
+        }
+    }
+    return undefined; // Let the browser use its default
+};
 
 const processUserResponse = async (transcript, audioBase64, mimeType) => {
     const { view } = useStore.getState();
@@ -607,7 +727,9 @@ const processExerciseFeedback = async (transcript, audioBase64, mimeType) => {
         }
       });
       addToast({ title: 'Challenge Complete!', message: `You scored ${averageScore}.`, icon: 'military_tech' });
+      speakText(`Challenge complete! You scored ${averageScore}. Well done!`);
       useStore.setState({ congratsAnimation: { show: true, text: 'Challenge Complete!' } });
+      checkAndUpdateStreak();
     } catch (error) {
       console.error("Error in interactive lesson:", error);
       addToast({ title: 'AI Error', message: 'Could not get a response.', icon: 'error' });
@@ -656,7 +778,9 @@ const processExerciseFeedback = async (transcript, audioBase64, mimeType) => {
           s.justCompleted = { levelId, lessonId };
         });
         addToast({ title: 'Lesson Complete!', message: `Average score: ${lessonAverage}.`, icon: 'military_tech' });
+        speakText(`Lesson complete! Your average score was ${lessonAverage}.`);
         useStore.setState({ congratsAnimation: { show: true, text: 'Lesson Complete!' } });
+        checkAndUpdateStreak();
       }
     } catch (error) {
        console.error("Error getting exercise feedback:", error);
@@ -666,9 +790,9 @@ const processExerciseFeedback = async (transcript, audioBase64, mimeType) => {
   }
 
   if (!isPractice && user && !user.isAnonymous) {
-      const { progress, user: updatedUser } = useStore.getState();
+      const { progress, user: updatedUser, dailyStreak } = useStore.getState();
       const progressRef = doc(db, "progress", user.uid);
-      await updateDoc(progressRef, { progress, 'user.xp': updatedUser.xp }).catch(err => console.error("Failed to save progress:", err));
+      await updateDoc(progressRef, { progress, 'user.xp': updatedUser.xp, dailyStreak }).catch(err => console.error("Failed to save progress:", err));
   }
   checkAndAwardAchievements();
 };
@@ -741,23 +865,40 @@ const handleRecordingStop = () => {
     reader.onloadend = () => {
         const base64Audio = reader.result.split(',')[1];
         const state = useStore.getState();
-        const { view, currentLesson } = state;
+        const { view, currentLesson, isOnline, isAiEnabled } = state;
 
-        // For standard lessons, create a pending recording for preview.
-        // For all other modes, process immediately to maintain conversational flow.
         const isStandardLesson = view === 'exercise' && currentLesson && !['roleplay', 'boss_battle'].includes(currentLesson.lessonType);
         
         if (isStandardLesson) {
-            const promptIndex = currentLesson.currentPromptIndex;
-            useStore.setState(s => {
-                s.currentLesson.prompts[promptIndex].pendingRecording = {
-                    audioBase64: base64Audio,
-                    audioMimeType: audioMimeType,
-                    transcript: recordedTranscript,
-                };
-            });
-            // Stop the processing spinner, as we're now in preview mode.
-            useStore.setState({ isProcessing: false });
+            // For standard lessons, check if we should get AI feedback or just save the recording.
+            if (!isOnline || !isAiEnabled) {
+                // Offline/No-AI: Skip preview, go directly to saving the recording for playback.
+                const promptIndex = currentLesson.currentPromptIndex;
+                const currentPrompt = currentLesson.prompts[promptIndex];
+                useStore.setState(s => {
+                    s.currentLesson.prompts[promptIndex] = {
+                        ...currentPrompt,
+                        userTranscript: recordedTranscript,
+                        userRecordingBase64: base64Audio,
+                        userRecordingMimeType: audioMimeType,
+                        feedback: 'OFFLINE_RECORDING',
+                        pendingRecording: null,
+                    };
+                    s.isProcessing = false;
+                });
+                addToast({ title: 'Recording Saved', message: 'You can now compare your recording to the prompt.', icon: isOnline ? 'toggle_off' : 'wifi_off' });
+            } else {
+                // Online/AI-Enabled: Show preview before submitting for feedback.
+                const promptIndex = currentLesson.currentPromptIndex;
+                useStore.setState(s => {
+                    s.currentLesson.prompts[promptIndex].pendingRecording = {
+                        audioBase64: base64Audio,
+                        audioMimeType: audioMimeType,
+                        transcript: recordedTranscript,
+                    };
+                });
+                useStore.setState({ isProcessing: false });
+            }
         } else {
             // For race, conversation, roleplay, etc., process immediately.
             processUserResponse(recordedTranscript, base64Audio, audioMimeType);
@@ -773,9 +914,16 @@ export const startRecording = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     
+    const supportedMimeType = getSupportedMimeType();
+    const options = supportedMimeType ? { mimeType: supportedMimeType } : {};
+    
     // Media Recorder for audio capture
-    mediaRecorder = new MediaRecorder(stream);
-    audioMimeType = mediaRecorder.mimeType;
+    mediaRecorder = new MediaRecorder(stream, options);
+
+    // FIX: Read the actual mimeType from the recorder instance.
+    // If it's still empty for some reason, provide a sensible default to prevent API errors.
+    audioMimeType = mediaRecorder.mimeType || 'audio/webm';
+    
     mediaRecorder.addEventListener("dataavailable", e => audioChunks.push(e.data));
     mediaRecorder.addEventListener("stop", handleRecordingStop);
     mediaRecorder.start();
