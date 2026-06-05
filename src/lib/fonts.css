@@ -1,0 +1,15 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+*/
+/*
+  Font loading is now handled directly in `index.html` via a <link> tag
+  for better performance and reliability. This file is kept for clarity
+  and to explain the font stack.
+*/
+
+/*
+  Note: 'Google Sans Display' and 'Google Sans Text' are proprietary fonts
+  and are not available on the public Google Fonts CDN. They are not included
+  here and will rely on system fallbacks or being installed on the user's device.
+*/

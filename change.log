@@ -1,0 +1,34 @@
+# Change Log
+
+All notable changes to this project will be documented in this file.
+
+## [1.0.4] - 2026-06-02
+
+### Added
+- **Secure Server-side Proxy**: Created `/server.ts` using Express + Vite, enabling full-stack operation.
+- **Vite Middleware**: Configured the developer server to use Vite middleware, and production build to bundle `server.ts` into a self-contained CommonJS compilation (`dist/server.cjs`).
+- **Server Metadata Capabilities**: Configured `majorCapabilities` in `metadata.json` to feature `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API`.
+
+### Fixed
+- **API Key Browser Crash**: Prevented the applet crash (`Uncaught Error: An API Key must be set when running in a browser`) by migrating client-side calls to secure server proxy endpoints `/api/gemini/*` which execute Gemini server-side using the environment variable `GEMINI_API_KEY`.
+- **Removed @google/genai Client imports**: Replaced references and imports of `@google/genai` on the client side (`src/lib/actions.js`, `src/lib/prompts.js`) with lightweight, browser-safe, and highly-compatible API proxies.
+
+## [1.0.3] - 2026-06-02
+
+### Changed
+- **Firebase Project Alignment**: Swapped the incorrect deployment target project id from `ironwork-manager` to `echo-expedition` inside `/.firebaserc` files to prevent Firebase Hosting "Site Not Found" error.
+
+## [1.0.2] - 2026-06-02
+
+### Fixed
+- **Env Configuration Typo**: Corrected the value of `VITE_FIREBASE_STORAGE_BUCKET` in `.env.example` by resolving a minor typo in the endpoint bucket path.
+- **Troubleshooting Documentation**: Added comprehensive troubleshooting steps for resolving Google Cloud warning alerts and Firebase Hosting site not found problems.
+
+## [1.0.1] - 2026-06-01
+
+### Fixed
+- **Dependency Missing**: Installed the official `firebase` NPM package since Vite production build was failing to resolve `"firebase/auth"` and other Firebase SDK imports.
+- **Firebase Project Config**: Initialized a complete `/.firebaserc` file mapping the default deploying project to `"ironwork-manager"`.
+- **Typo Configuration**: Removed redundant typo file `/.firebasrc` from root directory.
+- **Dynamic Configuration**: Enhanced `/src/lib/firebase.js` to support dynamic loading of Firebase Configuration credentials from environment variables (`import.meta.env.*`) with local fallback.
+- **Environment Example**: Restored binary-corrupted `/.env.example` file with a clean template showcasing configurable Firebase keys.
