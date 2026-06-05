@@ -83,41 +83,71 @@ This will start the Vite development server, and you can view the application by
 
 ---
 
-## Deployment & Hosting Setup
+## Experimental Deployment & Hosting Guide
 
-The application is configured to deploy directly to Firebase Hosting under the project ID `echo-expedition` (e.g. `https://echo-expedition.web.app/login`).
+Since this app is full-stack (it has a frontend web interface and a secure AI database proxy to protect your API keys), pure static hosting is not enough on its own. Here is how you can easily deploy it for experimental purposes to **Vercel** and **Firebase**.
 
-### 1. Automatic GitHub Deployment Configurations
-Provide the following environment variables (defined in your GitHub Secrets or environment) when executing your workflow builds:
-- `VITE_FIREBASE_API_KEY`
-- `VITE_FIREBASE_AUTH_DOMAIN`
-- `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
-- `VITE_FIREBASE_APP_ID`
-- `VITE_FIREBASE_MEASUREMENT_ID`
+---
 
-If not set, the client SDK will fall back to default template configurations safely.
+### Option A: Deploying to Vercel (Easiest & Free)
 
-### 2. Manual Firebase CLI Deploy
-Run:
+Vercel is the easiest option for experimental full-stack projects because it sets up both your React frontend and your serverless backend endpoints automatically!
+
+#### Step 1: Push your code to GitHub
+Make sure all your latest code (including the brand new `api` folder and `vercel.json` file) is pushed to your GitHub repository.
+
+#### Step 2: Import your repository to Vercel
+1. Go to the [Vercel Dashboard](https://vercel.com/) and click **Add New** -> **Project**.
+2. Connect your GitHub account and select your repository.
+
+#### Step 3: Configure Environment Variables
+Before clicking "Deploy", expand the **Environment Variables** section and add:
+- `GEMINI_API_KEY`: Paste your Google Gemini API Key here.
+
+#### Step 4: Deploy!
+- Click **Deploy**. Vercel will build your static files and deploy the `/api/*` folder as a Serverless function automatically.
+
+---
+
+### Option B: Deploying to Firebase (Complete Full-Stack)
+
+To host a full-stack site on Firebase, we use **Firebase Hosting** for the fast static React page, and **Firebase Cloud Functions** to run our secure AI endpoints.
+
+#### Step 1: Install Firebase CLI
+If you don't have it already, open your terminal and install the Firebase command line tools:
 ```bash
-# Connect to your active Firebase project
-firebase use echo-expedition
-
-# Production build and deploy hosting
-npm run build
-firebase deploy --only hosting
+npm install -g firebase-tools
 ```
+
+#### Step 2: Build your React App
+Run the production build script locally to generate your static files:
+```bash
+npm run build
+```
+
+#### Step 3: Set up Cloud Functions Secrets
+We need to give your Cloud Function access to your Gemini API Key. Run this command in your terminal:
+```bash
+firebase functions:secrets:set GEMINI_API_KEY="your_actual_gemini_api_key"
+```
+
+#### Step 4: Deploy both Hosting and Functions
+Now, trigger the deployment for the entire full-stack configuration:
+```bash
+firebase deploy
+```
+This single command will upload your static React user interface to Firebase Hosting and host your server proxy code under Cloud Functions under the same custom link safely!
+
+---
 
 ## Responsive Layout & Theme Harmony
 
-- **Responsive Adaptivity**: The application UI is built using mobile-first Tailwind utility grids, fluid layouts and flexible margins, scaling optimally across smartphones, tablets, laptops, and ultra-wide desktops.
+- **Responsive Adaptivity**: The application UI is built using mobile-first Tailwind utility grids, fluid layouts, and flexible margins, scaling optimally across smartphones, tablets, laptops, and ultra-wide desktops.
 - **Light & Dark Theme Styling**: Consistent contrast supports both classic light modes and midnight themes with clear typography, responsive chart components, and readable body texts.
 
 ## Full-Stack Server & Secure AI Proxy
 
-To resolve the browser API key required error, the application features an integrated node server-side proxy (`/server.ts`):
+To resolve the browser API key required error, the application features an integrated server-side proxy (`/server.ts`):
 - **Full-stack Express Backend**: Integrates Vite Dev Middleware inside a single unified container workspace, ensuring immediate reload times in development and production builds.
 - **Proxy Endpoints**: Routes all client-side calls through secure `/api/gemini/generateContent` and `/api/gemini/generateImages` endpoints.
 - **Enhanced Security**: Keeps all third-party and Gemini API keys hidden from client-side bundles and browser inspector panels. Highly responsive error fallbacks are automatically returned to frontend states on connection timeouts.
